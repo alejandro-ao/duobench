@@ -19,11 +19,12 @@ from pathlib import Path
 
 from kcbench.aggregate import TrialRecord, aggregate
 from kcbench.charts import generate_charts
-from kcbench.config import Condition, Config, load_config
+from kcbench.config import Condition, Config, ConfigError, load_config
 from kcbench.judge import DIMENSIONS, average_dimensions, judge_panel
 from kcbench.plan_phase import run_plan_phase
 from kcbench.impl_phase import run_impl_phase
 from kcbench.verify import verify_build
+from kcbench.pi_rpc import PiRpcError
 
 REPO = Path(__file__).resolve().parents[2]
 PROMPTS = REPO / "prompts"
@@ -124,8 +125,18 @@ def run_condition_trial(
     return record, record_meta
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(prog="kcbench")
+def _main() -> None:
+    ap = argparse.ArgumentParser(
+        prog="kcbench",
+        description="Run planner×implementer model benchmarks over Pi RPC.",
+        epilog=(
+            "Examples:\n"
+            "  kcbench run --dry-run\n"
+            "  kcbench run --conditions kimi-solo --trials 1\n"
+            "  kcbench run --conditions kimi-solo,gpt-x-kimi --trials 3"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
     rp = sub.add_parser("run", help="run the benchmark")
     rp.add_argument("--trials", type=int, default=1)
@@ -137,6 +148,7 @@ def main() -> None:
     rp.add_argument("--plan-timeout", type=float, default=600.0)
     rp.add_argument("--impl-timeout", type=float, default=1800.0)
     rp.add_argument("--judge-timeout", type=float, default=300.0)
+    rp.add_argument("--debug", action="store_true", help="show full Python tracebacks on errors")
     args = ap.parse_args()
 
     cfg = load_config(args.models_config, args.conditions_config)
@@ -153,8 +165,16 @@ def main() -> None:
     run_dir = Path(args.out) / ts
     cond_root = run_dir / "conditions"
     cond_root.mkdir(parents=True, exist_ok=True)
-    print(f"run dir: {run_dir}  | conditions: {[c.id for c in conditions]} | trials: {args.trials}"
-          f"{' | DRY-RUN' if args.dry_run else ''}")
+    print("\n=== kimi-claude-bench ===")
+    print(f"mode: {'DRY RUN (no model/API calls)' if args.dry_run else 'REAL RUN'}")
+    print(f"run dir: {run_dir}")
+    print(f"trials per condition: {args.trials}")
+    print("conditions:")
+    for c in conditions:
+        print(f"  - {c.id}: planner={c.planner} implementer={c.implementer}")
+    if not args.dry_run:
+        print("\nTip: if this is your first run, `kcbench run --dry-run` validates the pipeline without API spend.")
+    print()
 
     # --- phase 1: plan + implement + verify per condition×trial ---
     records: list[TrialRecord] = []
@@ -201,13 +221,37 @@ def main() -> None:
     for f in written + [run_dir / "results.json"]:
         shutil.copy(f, top_results / f.name)
 
-    print(f"done. results.json + {len(written)} chart/csv files in {results_dir}")
+    print(f"\ndone. results.json + {len(written)} chart/csv files in {results_dir}")
     print(f"copied to {top_results}/ for the video")
     # leaderboard preview
     ranked = sorted(results["conditions"].items(), key=lambda kv: kv[1]["quality"], reverse=True)
     print("\nleaderboard (quality | cost$ | efficiency):")
     for cid, c in ranked:
         print(f"  {cid:14} {c['quality']:5.2f} | {c['cost_usd']:.4f} | {c['cost_efficiency']:.2f}")
+
+
+def main() -> None:
+    try:
+        _main()
+    except (ConfigError, PiRpcError) as e:
+        if "--debug" in sys.argv:
+            raise
+        sys.exit(
+            "\nERROR: " + str(e) +
+            "\n\nTry:\n"
+            "  - `uv run kcbench run --dry-run` to validate local wiring\n"
+            "  - check provider/model IDs in config/models.yaml\n"
+            "  - rerun with `--debug` for a full traceback"
+        )
+    except KeyboardInterrupt:
+        sys.exit("\nInterrupted by user.")
+    except Exception as e:
+        if "--debug" in sys.argv:
+            raise
+        sys.exit(
+            f"\nUnexpected error: {e}\n\n"
+            "Rerun with `--debug` for the full traceback."
+        )
 
 
 if __name__ == "__main__":
