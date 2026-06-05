@@ -84,8 +84,8 @@ key fails fast before any model is called.
 ## Live CLI
 
 When attached to an interactive terminal, `kcbench run` shows a Rich live dashboard with
-current phase, spinner, elapsed time, event/message/tool-call counts, tokens, cache tokens,
-configured cost, and Pi-reported cost. Use `--no-live` for plain logs or `--live` to force
+current phase, spinner, elapsed time, event/message/tool-call counts, the latest tool call,
+tokens, cache tokens, configured cost, and Pi-reported cost. Use `--no-live` for plain logs or `--live` to force
 it on.
 
 ## Outputs

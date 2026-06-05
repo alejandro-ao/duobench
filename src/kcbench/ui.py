@@ -25,6 +25,7 @@ class PhaseMetrics:
     reported_usd: float = 0.0
     last_event: str = ""
     last_tool: str = ""
+    last_tool_at: float = 0.0
 
 
 class NullUI:
@@ -122,6 +123,7 @@ class RichUI(NullUI):
         tool_name = _tool_name(ev)
         if tool_name:
             self.phase.last_tool = tool_name
+            self.phase.last_tool_at = time.time()
         self._refresh()
 
     def _refresh(self) -> None:
@@ -165,7 +167,10 @@ class RichUI(NullUI):
         metrics.add_row("configured cost", f"${self.phase.cost_usd:.6f}")
         metrics.add_row("Pi reported", f"${self.phase.reported_usd:.6f}")
         metrics.add_row("last event", self.phase.last_event or "—")
-        metrics.add_row("last tool", self.phase.last_tool or "—")
+        last_tool = self.phase.last_tool or "—"
+        if self.phase.last_tool_at:
+            last_tool = f"{last_tool} ({_fmt_duration(time.time() - self.phase.last_tool_at)} ago)"
+        metrics.add_row("last tool call", last_tool)
 
         done = Text.from_markup("\n".join(self.completed[-8:]) or "[dim]No completed phases yet.[/dim]")
         return Panel.fit(
@@ -226,15 +231,52 @@ def _count_tool_markers(ev: dict) -> int:
 
 
 def _tool_name(ev: dict) -> str:
-    for key in ("tool", "toolName", "name", "function"):
-        val = ev.get(key)
-        if isinstance(val, str) and val:
-            return val[:60]
-    msg = ev.get("message")
-    if isinstance(msg, dict):
-        for block in _content_blocks(msg):
-            for key in ("name", "tool", "toolName"):
-                val = block.get(key)
-                if isinstance(val, str) and val:
-                    return val[:60]
+    """Best-effort extraction of the latest tool/function call name from Pi events.
+
+    Pi event shapes vary by version/provider. Tool names can appear directly on the
+    event, inside message content blocks, or nested under input/toolUse/function_call
+    objects. This recursive extractor keeps the live dashboard useful across shapes.
+    """
+    return _find_tool_name(ev)[:80]
+
+
+def _find_tool_name(obj: Any) -> str:
+    if isinstance(obj, list):
+        for item in obj:
+            found = _find_tool_name(item)
+            if found:
+                return found
+        return ""
+    if not isinstance(obj, dict):
+        return ""
+
+    obj_type = str(obj.get("type", "")).lower()
+    looks_like_tool = any(s in obj_type for s in ("tool", "function")) or any(
+        k in obj for k in ("tool", "toolName", "tool_name", "function_call", "toolUse", "tool_use")
+    )
+
+    if looks_like_tool:
+        for key in ("toolName", "tool_name", "tool", "name"):
+            val = obj.get(key)
+            if isinstance(val, str) and val:
+                return val
+        fn = obj.get("function") or obj.get("function_call")
+        if isinstance(fn, dict):
+            val = fn.get("name")
+            if isinstance(val, str) and val:
+                return val
+        if isinstance(fn, str) and fn:
+            return fn
+
+    # Prefer likely content/message containers first so we find the newest visible tool
+    # block before generic metadata.
+    for key in ("content", "message", "delta", "toolUse", "tool_use", "input"):
+        if key in obj:
+            found = _find_tool_name(obj[key])
+            if found:
+                return found
+    for val in obj.values():
+        found = _find_tool_name(val)
+        if found:
+            return found
     return ""
