@@ -25,6 +25,30 @@ class PiRpcError(Exception):
     """Raised on RPC protocol errors, rejected set_model, or timeout."""
 
 
+def _reported_cost_to_float(value) -> float:
+    """Coerce Pi/provider reported cost into USD when possible.
+
+    Pi builds/providers are not fully consistent here: `usage.cost` may be a number,
+    a numeric string, or a structured object such as {"usd": ...} / {"total": ...}.
+    Unknown shapes are treated as 0 because configured pricing remains the benchmark
+    source of truth.
+    """
+    if value is None:
+        return 0.0
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return 0.0
+    if isinstance(value, dict):
+        for key in ("usd", "total", "totalUsd", "amount", "cost"):
+            if key in value:
+                return _reported_cost_to_float(value[key])
+    return 0.0
+
+
 @dataclass
 class Usage:
     input: int = 0
@@ -57,7 +81,7 @@ class Usage:
             output=int(u.get("output", 0) or 0),
             cache_read=int(u.get("cacheRead", 0) or 0),
             cache_write=int(u.get("cacheWrite", 0) or 0),
-            reported_cost=float(u.get("cost", 0.0) or 0.0),
+            reported_cost=_reported_cost_to_float(u.get("cost")),
         )
 
 

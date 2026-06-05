@@ -18,6 +18,12 @@ def test_usage_delta_includes_cached_tokens_and_reported_cost() -> None:
     assert delta.reported_cost == pytest.approx(0.005)
 
 
+def test_usage_accepts_structured_reported_cost() -> None:
+    usage = Usage.from_message_usage({"input": 1, "output": 2, "cost": {"usd": "0.123"}})
+
+    assert usage.reported_cost == pytest.approx(0.123)
+
+
 def test_compute_cost_uses_explicit_cache_rates() -> None:
     model = Model(
         key="m",
