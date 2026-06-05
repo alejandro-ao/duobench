@@ -1,0 +1,116 @@
+"""Config loading + fail-fast validation for models.yaml and conditions.yaml."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+import yaml
+
+
+class ConfigError(Exception):
+    """Raised when config is malformed or references unknown model keys."""
+
+
+@dataclass(frozen=True)
+class Pricing:
+    input: float                # $/MTok
+    output: float               # $/MTok
+    cache_read: float | None = None   # $/MTok; defaults to input rate when omitted
+    cache_write: float | None = None  # $/MTok; defaults to input rate when omitted
+
+
+@dataclass(frozen=True)
+class Model:
+    key: str
+    provider: str
+    model_id: str
+    pricing: Pricing
+
+
+@dataclass(frozen=True)
+class Condition:
+    id: str
+    planner: str       # model key
+    implementer: str   # model key
+
+
+@dataclass(frozen=True)
+class Config:
+    models: dict[str, Model]
+    judges: list[str]            # model keys
+    conditions: list[Condition]
+
+    def model(self, key: str) -> Model:
+        return self.models[key]
+
+
+def _require(cond: bool, msg: str) -> None:
+    if not cond:
+        raise ConfigError(msg)
+
+
+def load_config(
+    models_path: str | Path = "config/models.yaml",
+    conditions_path: str | Path = "config/conditions.yaml",
+) -> Config:
+    """Load and validate both config files. Fails fast with a clear error."""
+    models_path = Path(models_path)
+    conditions_path = Path(conditions_path)
+
+    _require(models_path.is_file(), f"models config not found: {models_path}")
+    _require(conditions_path.is_file(), f"conditions config not found: {conditions_path}")
+
+    models_raw = yaml.safe_load(models_path.read_text()) or {}
+    conditions_raw = yaml.safe_load(conditions_path.read_text()) or {}
+
+    # --- models ---
+    raw_models = models_raw.get("models")
+    _require(isinstance(raw_models, dict) and raw_models, "models.yaml: 'models' must be a non-empty mapping")
+
+    models: dict[str, Model] = {}
+    for key, spec in raw_models.items():
+        _require(isinstance(spec, dict), f"model '{key}': entry must be a mapping")
+        for field in ("provider", "model_id", "pricing"):
+            _require(field in spec, f"model '{key}': missing required field '{field}'")
+        pricing = spec["pricing"]
+        _require(
+            isinstance(pricing, dict) and "input" in pricing and "output" in pricing,
+            f"model '{key}': pricing must have 'input' and 'output'",
+        )
+        models[key] = Model(
+            key=key,
+            provider=str(spec["provider"]),
+            model_id=str(spec["model_id"]),
+            pricing=Pricing(
+                input=float(pricing["input"]),
+                output=float(pricing["output"]),
+                cache_read=float(pricing["cache_read"]) if "cache_read" in pricing else None,
+                cache_write=float(pricing["cache_write"]) if "cache_write" in pricing else None,
+            ),
+        )
+
+    # --- judges ---
+    judges = models_raw.get("judges")
+    _require(isinstance(judges, list) and judges, "models.yaml: 'judges' must be a non-empty list")
+    for j in judges:
+        _require(j in models, f"judge '{j}' is not defined in models")
+
+    # --- conditions ---
+    raw_conditions = conditions_raw.get("conditions")
+    _require(isinstance(raw_conditions, list) and raw_conditions, "conditions.yaml: 'conditions' must be a non-empty list")
+
+    conditions: list[Condition] = []
+    seen_ids: set[str] = set()
+    for c in raw_conditions:
+        _require(isinstance(c, dict), "each condition must be a mapping")
+        for field in ("id", "planner", "implementer"):
+            _require(field in c, f"condition {c!r}: missing required field '{field}'")
+        cid = str(c["id"])
+        _require(cid not in seen_ids, f"duplicate condition id: '{cid}'")
+        seen_ids.add(cid)
+        _require(c["planner"] in models, f"condition '{cid}': planner '{c['planner']}' not in models")
+        _require(c["implementer"] in models, f"condition '{cid}': implementer '{c['implementer']}' not in models")
+        conditions.append(Condition(id=cid, planner=str(c["planner"]), implementer=str(c["implementer"])))
+
+    return Config(models=models, judges=list(judges), conditions=conditions)
