@@ -1,0 +1,199 @@
+{
+  "conditions": {
+    "kimi-solo": {
+      "planner": "kimi-k2.6",
+      "implementer": "kimi-k2.6",
+      "dimensions": {
+        "architecture": 6.0,
+        "correctness": 6.0,
+        "visual_ux": 6.0
+      },
+      "dimensions_std": {
+        "architecture": 0.0,
+        "correctness": 0.0,
+        "visual_ux": 0.0
+      },
+      "quality": 6.0,
+      "quality_std": 0.0,
+      "cost_usd": 0.0,
+      "cost_std": 0.0,
+      "cost_efficiency": 0.0,
+      "trials": 1,
+      "impl_statuses": [
+        "complete"
+      ]
+    },
+    "gpt-solo": {
+      "planner": "gpt-5.5",
+      "implementer": "gpt-5.5",
+      "dimensions": {
+        "architecture": 6.0,
+        "correctness": 6.0,
+        "visual_ux": 6.0
+      },
+      "dimensions_std": {
+        "architecture": 0.0,
+        "correctness": 0.0,
+        "visual_ux": 0.0
+      },
+      "quality": 6.0,
+      "quality_std": 0.0,
+      "cost_usd": 0.0,
+      "cost_std": 0.0,
+      "cost_efficiency": 0.0,
+      "trials": 1,
+      "impl_statuses": [
+        "complete"
+      ]
+    },
+    "opus-solo": {
+      "planner": "claude-opus-4.8",
+      "implementer": "claude-opus-4.8",
+      "dimensions": {
+        "architecture": 6.0,
+        "correctness": 6.0,
+        "visual_ux": 6.0
+      },
+      "dimensions_std": {
+        "architecture": 0.0,
+        "correctness": 0.0,
+        "visual_ux": 0.0
+      },
+      "quality": 6.0,
+      "quality_std": 0.0,
+      "cost_usd": 0.0,
+      "cost_std": 0.0,
+      "cost_efficiency": 0.0,
+      "trials": 1,
+      "impl_statuses": [
+        "complete"
+      ]
+    },
+    "kimi-x-gpt": {
+      "planner": "kimi-k2.6",
+      "implementer": "gpt-5.5",
+      "dimensions": {
+        "architecture": 6.0,
+        "correctness": 6.0,
+        "visual_ux": 6.0
+      },
+      "dimensions_std": {
+        "architecture": 0.0,
+        "correctness": 0.0,
+        "visual_ux": 0.0
+      },
+      "quality": 6.0,
+      "quality_std": 0.0,
+      "cost_usd": 0.0,
+      "cost_std": 0.0,
+      "cost_efficiency": 0.0,
+      "trials": 1,
+      "impl_statuses": [
+        "complete"
+      ]
+    },
+    "gpt-x-kimi": {
+      "planner": "gpt-5.5",
+      "implementer": "kimi-k2.6",
+      "dimensions": {
+        "architecture": 6.0,
+        "correctness": 6.0,
+        "visual_ux": 6.0
+      },
+      "dimensions_std": {
+        "architecture": 0.0,
+        "correctness": 0.0,
+        "visual_ux": 0.0
+      },
+      "quality": 6.0,
+      "quality_std": 0.0,
+      "cost_usd": 0.0,
+      "cost_std": 0.0,
+      "cost_efficiency": 0.0,
+      "trials": 1,
+      "impl_statuses": [
+        "complete"
+      ]
+    },
+    "kimi-x-opus": {
+      "planner": "kimi-k2.6",
+      "implementer": "claude-opus-4.8",
+      "dimensions": {
+        "architecture": 6.0,
+        "correctness": 6.0,
+        "visual_ux": 6.0
+      },
+      "dimensions_std": {
+        "architecture": 0.0,
+        "correctness": 0.0,
+        "visual_ux": 0.0
+      },
+      "quality": 6.0,
+      "quality_std": 0.0,
+      "cost_usd": 0.0,
+      "cost_std": 0.0,
+      "cost_efficiency": 0.0,
+      "trials": 1,
+      "impl_statuses": [
+        "complete"
+      ]
+    },
+    "opus-x-kimi": {
+      "planner": "claude-opus-4.8",
+      "implementer": "kimi-k2.6",
+      "dimensions": {
+        "architecture": 6.0,
+        "correctness": 6.0,
+        "visual_ux": 6.0
+      },
+      "dimensions_std": {
+        "architecture": 0.0,
+        "correctness": 0.0,
+        "visual_ux": 0.0
+      },
+      "quality": 6.0,
+      "quality_std": 0.0,
+      "cost_usd": 0.0,
+      "cost_std": 0.0,
+      "cost_efficiency": 0.0,
+      "trials": 1,
+      "impl_statuses": [
+        "complete"
+      ]
+    }
+  },
+  "self_bias": {
+    "kimi-k2.6": {
+      "kimi-solo": 6.0,
+      "gpt-solo": 6.0,
+      "opus-solo": 6.0,
+      "kimi-x-gpt": 6.0,
+      "gpt-x-kimi": 6.0,
+      "kimi-x-opus": 6.0,
+      "opus-x-kimi": 6.0
+    },
+    "gpt-5.5": {
+      "kimi-solo": 6.0,
+      "gpt-solo": 6.0,
+      "opus-solo": 6.0,
+      "kimi-x-gpt": 6.0,
+      "gpt-x-kimi": 6.0,
+      "kimi-x-opus": 6.0,
+      "opus-x-kimi": 6.0
+    },
+    "claude-opus-4.8": {
+      "kimi-solo": 6.0,
+      "gpt-solo": 6.0,
+      "opus-solo": 6.0,
+      "kimi-x-gpt": 6.0,
+      "gpt-x-kimi": 6.0,
+      "kimi-x-opus": 6.0,
+      "opus-x-kimi": 6.0
+    }
+  },
+  "judges": [
+    "kimi-k2.6",
+    "gpt-5.5",
+    "claude-opus-4.8"
+  ]
+}

@@ -1,0 +1,8 @@
+condition,architecture,correctness,visual_ux
+kimi-solo,6.0,6.0,6.0
+gpt-solo,6.0,6.0,6.0
+opus-solo,6.0,6.0,6.0
+kimi-x-gpt,6.0,6.0,6.0
+gpt-x-kimi,6.0,6.0,6.0
+kimi-x-opus,6.0,6.0,6.0
+opus-x-kimi,6.0,6.0,6.0

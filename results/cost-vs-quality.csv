@@ -1,0 +1,8 @@
+condition,cost_usd,quality,cost_efficiency
+kimi-solo,0.0,6.0,0.0
+gpt-solo,0.0,6.0,0.0
+opus-solo,0.0,6.0,0.0
+kimi-x-gpt,0.0,6.0,0.0
+gpt-x-kimi,0.0,6.0,0.0
+kimi-x-opus,0.0,6.0,0.0
+opus-x-kimi,0.0,6.0,0.0

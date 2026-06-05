@@ -1,0 +1,214 @@
+"""Orchestrator CLI — a deterministic script (NOT an agent).
+
+Sequences: plan → implement → verify per condition×trial, then judge panel over every
+build, aggregates, and draws charts. The only agentic work is inside the Pi sessions.
+
+Usage:
+  uv run kcbench run [--trials N] [--conditions a,b,c] [--dry-run] [--out DIR]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+from kcbench.aggregate import TrialRecord, aggregate
+from kcbench.charts import generate_charts
+from kcbench.config import Condition, Config, load_config
+from kcbench.judge import DIMENSIONS, average_dimensions, judge_panel
+from kcbench.plan_phase import run_plan_phase
+from kcbench.impl_phase import run_impl_phase
+from kcbench.verify import verify_build
+
+REPO = Path(__file__).resolve().parents[2]
+PROMPTS = REPO / "prompts"
+
+
+def _load_prompt(name: str) -> str:
+    return (PROMPTS / name).read_text()
+
+
+def _stub_plan() -> str:
+    return "# Stub plan\nA minimal WebOS: WindowManager, AppRegistry, FileSystem, Taskbar.\n"
+
+
+def _stub_build(build_dir: Path) -> None:
+    build_dir.mkdir(parents=True, exist_ok=True)
+    (build_dir / "index.html").write_text(
+        "<!doctype html><html><body>"
+        "<div id='desktop'><div class='desktop-icon' data-app='a'>A</div>"
+        "<div class='desktop-icon' data-app='b'>B</div>"
+        "<div class='desktop-icon' data-app='c'>C</div></div>"
+        "<div class='taskbar'></div>"
+        "<script>document.querySelectorAll('.desktop-icon').forEach(i=>"
+        "i.onclick=()=>{const w=document.createElement('div');w.className='window';"
+        "document.body.appendChild(w);});</script></body></html>"
+    )
+
+
+def select_conditions(cfg: Config, only: list[str] | None) -> list[Condition]:
+    if not only:
+        return cfg.conditions
+    by_id = {c.id: c for c in cfg.conditions}
+    missing = [o for o in only if o not in by_id]
+    if missing:
+        sys.exit(f"unknown condition id(s): {', '.join(missing)}")
+    return [by_id[o] for o in only]
+
+
+def run_condition_trial(
+    cfg: Config,
+    cond: Condition,
+    trial: int,
+    trial_dir: Path,
+    prompts: dict[str, str],
+    *,
+    dry_run: bool,
+    plan_timeout: float,
+    impl_timeout: float,
+) -> tuple[TrialRecord, dict]:
+    planner = cfg.model(cond.planner)
+    implementer = cfg.model(cond.implementer)
+    build_dir = trial_dir / "build"
+    shots_dir = trial_dir / "screenshots"
+    print(f"  [{cond.id} trial {trial}] plan={cond.planner} impl={cond.implementer}")
+
+    # --- plan ---
+    if dry_run:
+        plan_text = _stub_plan()
+        (trial_dir / "plan.md").write_text(plan_text)
+        plan_cost = 0.0
+    else:
+        plan_text, pc = run_plan_phase(planner, prompts["architect"], trial_dir,
+                                       timeout=plan_timeout, pin_temperature=True)
+        plan_cost = pc.usd
+
+    # --- implement ---
+    if dry_run:
+        _stub_build(build_dir)
+        impl_cost = 0.0
+        impl_status = "complete"
+    else:
+        impl = run_impl_phase(implementer, prompts["implement"], plan_text, build_dir,
+                              timeout=impl_timeout, pin_temperature=True)
+        impl_cost = impl.cost.usd
+        impl_status = impl.status
+
+    # --- verify ---
+    vres = verify_build(build_dir, shots_dir)
+    (trial_dir / "verify.json").write_text(json.dumps(vres.to_dict(), indent=2))
+
+    record = TrialRecord(
+        condition_id=cond.id,
+        planner=cond.planner,
+        implementer=cond.implementer,
+        trial=trial,
+        cost_usd=round(plan_cost + impl_cost, 6),
+        dimensions={d: 0.0 for d in DIMENSIONS},   # filled after judging
+        per_judge={},
+        impl_status=impl_status,
+    )
+    # stash paths for the judging pass
+    record_meta = {
+        "build_dir": str(build_dir),
+        "smoke_summary": vres.summary_for_judge(),
+        "screenshots": vres.screenshots,
+    }
+    (trial_dir / "trial.json").write_text(json.dumps(
+        {"record": record.__dict__, "meta": record_meta}, indent=2, default=str))
+    return record, record_meta
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(prog="kcbench")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    rp = sub.add_parser("run", help="run the benchmark")
+    rp.add_argument("--trials", type=int, default=1)
+    rp.add_argument("--conditions", type=str, default="", help="comma-separated condition ids")
+    rp.add_argument("--dry-run", action="store_true", help="stub all model calls")
+    rp.add_argument("--out", type=str, default="runs")
+    rp.add_argument("--models-config", type=str, default="config/models.yaml")
+    rp.add_argument("--conditions-config", type=str, default="config/conditions.yaml")
+    rp.add_argument("--plan-timeout", type=float, default=600.0)
+    rp.add_argument("--impl-timeout", type=float, default=1800.0)
+    rp.add_argument("--judge-timeout", type=float, default=300.0)
+    args = ap.parse_args()
+
+    cfg = load_config(args.models_config, args.conditions_config)
+    only = [c.strip() for c in args.conditions.split(",") if c.strip()] or None
+    conditions = select_conditions(cfg, only)
+
+    prompts = {
+        "architect": _load_prompt("architect.md"),
+        "implement": _load_prompt("implement.md"),
+        "judge": _load_prompt("judge.md"),
+    }
+
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+    run_dir = Path(args.out) / ts
+    cond_root = run_dir / "conditions"
+    cond_root.mkdir(parents=True, exist_ok=True)
+    print(f"run dir: {run_dir}  | conditions: {[c.id for c in conditions]} | trials: {args.trials}"
+          f"{' | DRY-RUN' if args.dry_run else ''}")
+
+    # --- phase 1: plan + implement + verify per condition×trial ---
+    records: list[TrialRecord] = []
+    metas: list[dict] = []
+    for cond in conditions:
+        for trial in range(args.trials):
+            trial_dir = cond_root / cond.id / f"trial-{trial}"
+            trial_dir.mkdir(parents=True, exist_ok=True)
+            rec, meta = run_condition_trial(
+                cfg, cond, trial, trial_dir, prompts,
+                dry_run=args.dry_run,
+                plan_timeout=args.plan_timeout, impl_timeout=args.impl_timeout,
+            )
+            records.append(rec)
+            metas.append(meta)
+
+    # --- phase 2: judge panel over every build ---
+    print("judging...")
+    for rec, meta in zip(records, metas):
+        if args.dry_run:
+            # canned scores so the wiring runs without real judges
+            for jk in cfg.judges:
+                rec.per_judge[jk] = {d: 6 for d in DIMENSIONS}
+            rec.dimensions = {d: 6.0 for d in DIMENSIONS}
+            continue
+        scores = judge_panel(
+            cfg, prompts["judge"], Path(meta["build_dir"]),
+            meta["smoke_summary"], meta["screenshots"], timeout=args.judge_timeout,
+        )
+        rec.per_judge = {
+            s.judge: {d: getattr(s, d) for d in DIMENSIONS} for s in scores if s.error is None
+        }
+        rec.dimensions = average_dimensions(scores)
+
+    # --- phase 3: aggregate + charts ---
+    results = aggregate(records, cfg.judges)
+    (run_dir / "results.json").write_text(json.dumps(results, indent=2))
+
+    results_dir = run_dir / "results"
+    written = generate_charts(results, results_dir)
+    # mirror committed artifacts to top-level results/ for the video
+    top_results = Path("results")
+    top_results.mkdir(exist_ok=True)
+    for f in written + [run_dir / "results.json"]:
+        shutil.copy(f, top_results / f.name)
+
+    print(f"done. results.json + {len(written)} chart/csv files in {results_dir}")
+    print(f"copied to {top_results}/ for the video")
+    # leaderboard preview
+    ranked = sorted(results["conditions"].items(), key=lambda kv: kv[1]["quality"], reverse=True)
+    print("\nleaderboard (quality | cost$ | efficiency):")
+    for cid, c in ranked:
+        print(f"  {cid:14} {c['quality']:5.2f} | {c['cost_usd']:.4f} | {c['cost_efficiency']:.2f}")
+
+
+if __name__ == "__main__":
+    main()

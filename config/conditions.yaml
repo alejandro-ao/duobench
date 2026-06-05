@@ -1,0 +1,11 @@
+# Explicit planner×implementer combinations. `planner` and `implementer` are keys into
+# models.yaml. No tiers, no auto-expansion — to test a different lineup, just rewrite
+# these rows (e.g. deepseek × minimax pairings). `id` is used for output filenames/charts.
+conditions:
+  - { id: kimi-solo,   planner: kimi-k2.6,       implementer: kimi-k2.6 }
+  - { id: gpt-solo,    planner: gpt-5.5,         implementer: gpt-5.5 }
+  - { id: opus-solo,   planner: claude-opus-4.8, implementer: claude-opus-4.8 }
+  - { id: kimi-x-gpt,  planner: kimi-k2.6,       implementer: gpt-5.5 }
+  - { id: gpt-x-kimi,  planner: gpt-5.5,         implementer: kimi-k2.6 }
+  - { id: kimi-x-opus, planner: kimi-k2.6,       implementer: claude-opus-4.8 }
+  - { id: opus-x-kimi, planner: claude-opus-4.8, implementer: kimi-k2.6 }

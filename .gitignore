@@ -1,0 +1,12 @@
+# Generated run artifacts (raw builds, screenshots, browser binaries)
+runs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# OS
+.DS_Store
