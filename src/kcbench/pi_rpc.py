@@ -13,6 +13,7 @@ so the orchestrator can fail fast with a clear message.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import threading
 import time
@@ -137,6 +138,15 @@ class PiSession:
         if not self.enable_tools:
             args.append("--no-tools")
         args += self.extra_args
+        env = os.environ.copy()
+        # Sessions run inside runs/<...>, which is nested under this repo. Prevent a
+        # benchmarked agent from discovering/mutating the harness git repository if it
+        # invokes git from its build directory.
+        cwd_parent = str(Path(self.cwd).resolve().parent)
+        existing_ceiling = env.get("GIT_CEILING_DIRECTORIES")
+        env["GIT_CEILING_DIRECTORIES"] = (
+            f"{cwd_parent}{os.pathsep}{existing_ceiling}" if existing_ceiling else cwd_parent
+        )
         self._proc = subprocess.Popen(
             args,
             stdin=subprocess.PIPE,
@@ -145,6 +155,7 @@ class PiSession:
             text=True,
             bufsize=1,
             cwd=self.cwd,
+            env=env,
         )
         self._reader = threading.Thread(target=self._read_stdout, daemon=True)
         self._reader.start()
