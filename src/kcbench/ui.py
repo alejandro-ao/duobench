@@ -21,6 +21,7 @@ class PhaseMetrics:
     tool_calls: int = 0
     turns: int = 0
     usage: Usage = field(default_factory=Usage)
+    finalized_usage: Usage = field(default_factory=Usage)
     cost_usd: float = 0.0
     reported_usd: float = 0.0
     last_event: str = ""
@@ -108,9 +109,17 @@ class RichUI(NullUI):
 
     def add_turn_result(self, usage: Usage, cost_usd: float, reported_usd: float = 0.0) -> None:
         self.phase.turns += 1
-        self.phase.usage.add(usage)
+        self.phase.finalized_usage.add(usage)
+        if _token_total(self.phase.finalized_usage) >= _token_total(self.phase.usage):
+            self.phase.usage = Usage(
+                input=self.phase.finalized_usage.input,
+                output=self.phase.finalized_usage.output,
+                cache_read=self.phase.finalized_usage.cache_read,
+                cache_write=self.phase.finalized_usage.cache_write,
+                reported_cost=self.phase.finalized_usage.reported_cost,
+            )
         self.phase.cost_usd += cost_usd
-        self.phase.reported_usd += reported_usd
+        self.phase.reported_usd = max(self.phase.reported_usd, self.phase.finalized_usage.reported_cost, reported_usd)
         self._refresh()
 
     def on_rpc_event(self, ev: dict) -> None:
@@ -119,11 +128,16 @@ class RichUI(NullUI):
         self.phase.last_event = etype
         if etype in {"message_start", "message_end"}:
             self.phase.messages += 1
-        self.phase.tool_calls += _count_tool_markers(ev)
-        tool_name = _tool_name(ev)
-        if tool_name:
-            self.phase.last_tool = tool_name
-            self.phase.last_tool_at = time.time()
+        usage = _usage_from_event(ev)
+        if usage and _token_total(usage) >= _token_total(self.phase.usage):
+            self.phase.usage = usage
+            self.phase.reported_usd = max(self.phase.reported_usd, usage.reported_cost)
+        if _is_tool_call_event(ev):
+            self.phase.tool_calls += 1
+            tool_name = _tool_name(ev)
+            if tool_name:
+                self.phase.last_tool = tool_name
+                self.phase.last_tool_at = time.time()
         self._refresh()
 
     def _refresh(self) -> None:
@@ -212,22 +226,56 @@ def _content_blocks(message: dict) -> list[dict]:
     return []
 
 
-def _count_tool_markers(ev: dict) -> int:
-    count = 0
+def _token_total(usage: Usage) -> int:
+    return usage.input + usage.output + usage.cache_read + usage.cache_write
+
+
+def _usage_from_event(ev: dict) -> Usage | None:
+    usage_obj = _find_usage_obj(ev)
+    if not usage_obj:
+        return None
+    try:
+        from kcbench.pi_rpc import Usage as RpcUsage
+
+        return RpcUsage.from_message_usage(usage_obj)
+    except Exception:
+        return None
+
+
+def _find_usage_obj(obj: Any) -> dict | None:
+    if isinstance(obj, list):
+        for item in obj:
+            found = _find_usage_obj(item)
+            if found:
+                return found
+        return None
+    if not isinstance(obj, dict):
+        return None
+    usage = obj.get("usage")
+    if isinstance(usage, dict) and ("input" in usage or "output" in usage or "totalTokens" in usage):
+        return usage
+    if "input" in obj and "output" in obj and ("totalTokens" in obj or "cost" in obj):
+        return obj
+    for key in ("message", "delta", "event"):
+        if key in obj:
+            found = _find_usage_obj(obj[key])
+            if found:
+                return found
+    return None
+
+
+def _is_tool_call_event(ev: dict) -> bool:
     etype = str(ev.get("type", "")).lower()
-    if "tool" in etype or "function" in etype:
-        count += 1
-    msg = ev.get("message")
-    if isinstance(msg, dict):
-        for block in _content_blocks(msg):
+    if etype in {"tool_call", "tool_use", "tool_start", "function_call"}:
+        return True
+    # Content blocks are more reliable than generic event/message metadata. Avoid
+    # counting every message_update just because it contains a nested `name` field.
+    for container in (ev, ev.get("message") if isinstance(ev.get("message"), dict) else {}):
+        for block in _content_blocks(container):
             btype = str(block.get("type", "")).lower()
-            if "tool" in btype or "function" in btype:
-                count += 1
-    for block in _content_blocks(ev):
-        btype = str(block.get("type", "")).lower()
-        if "tool" in btype or "function" in btype:
-            count += 1
-    return count
+            if btype in {"tool_use", "tool_call", "function_call"}:
+                return True
+    return False
 
 
 def _tool_name(ev: dict) -> str:

@@ -97,8 +97,10 @@ report.html       visual run report: builds, screenshots, agent threads, timing/
 conditions/<id>/trial-<n>/
   plan.md                    planner output (the handoff artifact)
   planner-transcript.json    raw planner thread + timing/token/cost stats
+  planner-events.jsonl       raw Pi RPC events for debugging/live UI adaptation
   implementer-transcript.json raw implementer turns + tool/message stats
-  judge-transcripts/         one raw judge thread per judge model
+  implementer-events.jsonl   raw Pi RPC events from the implementer session
+  judge-transcripts/         one raw judge thread per judge model (+ *.events.jsonl)
   build/                     implementer's files (index.html at root)
   screenshots/               desktop + per-app launch shots
   verify.json                Playwright smoke signals

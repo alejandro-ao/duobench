@@ -70,7 +70,12 @@ def run_impl_phase(
     if ui:
         ui.start_phase("Implementing", implementer.key)
 
-    with PiSession(cwd=build_dir, enable_tools=True, event_callback=getattr(ui, "on_rpc_event", None)) as s:
+    with PiSession(
+        cwd=build_dir,
+        enable_tools=True,
+        event_callback=getattr(ui, "on_rpc_event", None),
+        raw_events_path=build_dir.parent / "implementer-events.jsonl",
+    ) as s:
         s.set_model(implementer.provider, implementer.model_id)
         if pin_temperature:
             s.set_thinking("off")

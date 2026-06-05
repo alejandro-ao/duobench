@@ -111,6 +111,7 @@ class PiSession:
         pi_bin: str = "pi",
         extra_args: list[str] | None = None,
         event_callback: Callable[[dict], None] | None = None,
+        raw_events_path: str | Path | None = None,
     ) -> None:
         self.cwd = str(cwd)
         self.enable_tools = enable_tools
@@ -118,6 +119,8 @@ class PiSession:
         self.pi_bin = pi_bin
         self.extra_args = extra_args or []
         self.event_callback = event_callback
+        self.raw_events_path = Path(raw_events_path) if raw_events_path else None
+        self._raw_events_lock = threading.Lock()
         self._proc: subprocess.Popen | None = None
         self._events: "Queue[dict]" = Queue()
         self._reader: threading.Thread | None = None
@@ -172,7 +175,9 @@ class PiSession:
             if not line:
                 continue
             try:
-                self._events.put(json.loads(line))
+                ev = json.loads(line)
+                self._write_raw_event(ev)
+                self._events.put(ev)
             except json.JSONDecodeError:
                 continue
 
@@ -189,6 +194,16 @@ class PiSession:
 
     def _stderr_tail(self, n: int = 800) -> str:
         return "".join(self._stderr_buf)[-n:]
+
+    def _write_raw_event(self, ev: dict) -> None:
+        if not self.raw_events_path:
+            return
+        try:
+            self.raw_events_path.parent.mkdir(parents=True, exist_ok=True)
+            with self._raw_events_lock, self.raw_events_path.open("a") as f:
+                f.write(json.dumps({"ts": time.time(), "event": ev}, default=str) + "\n")
+        except Exception:
+            pass
 
     # -- commands --
 

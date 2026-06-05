@@ -133,7 +133,13 @@ def judge_build(
     transcript = new_transcript("judge", judge_model)
     if ui:
         ui.start_phase("Judging", judge_key)
-    with PiSession(cwd=Path.cwd(), enable_tools=False, event_callback=getattr(ui, "on_rpc_event", None)) as s:
+    raw_events_path = transcript_path.with_suffix(".events.jsonl") if transcript_path else None
+    with PiSession(
+        cwd=Path.cwd(),
+        enable_tools=False,
+        event_callback=getattr(ui, "on_rpc_event", None),
+        raw_events_path=raw_events_path,
+    ) as s:
         s.set_model(judge_model.provider, judge_model.model_id)
         s.set_thinking("off")  # determinism best-effort
         try:

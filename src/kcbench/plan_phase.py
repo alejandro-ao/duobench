@@ -30,7 +30,12 @@ def run_plan_phase(
     transcript = new_transcript("planner", planner)
     if ui:
         ui.start_phase("Planning", planner.key)
-    with PiSession(cwd=out_dir, enable_tools=False, event_callback=getattr(ui, "on_rpc_event", None)) as s:
+    with PiSession(
+        cwd=out_dir,
+        enable_tools=False,
+        event_callback=getattr(ui, "on_rpc_event", None),
+        raw_events_path=out_dir / "planner-events.jsonl",
+    ) as s:
         s.set_model(planner.provider, planner.model_id)
         if pin_temperature:
             s.set_thinking("off")
