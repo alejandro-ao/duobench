@@ -46,6 +46,7 @@ uv run kcbench run --trials 3
 | `--plan-timeout` | `600` | Planner wall-clock (s) |
 | `--impl-timeout` | `1800` | Implementer wall-clock (s) |
 | `--judge-timeout` | `300` | Per-judge wall-clock (s) |
+| `--live` / `--no-live` | auto | Force-enable/disable the Rich live dashboard |
 
 ## Configuration
 
@@ -79,6 +80,13 @@ conditions:
 To benchmark a different lineup (e.g. DeepSeek × MiniMax) just rewrite these two files.
 Config is validated up front: any planner/implementer/judge that isn't a registered model
 key fails fast before any model is called.
+
+## Live CLI
+
+When attached to an interactive terminal, `kcbench run` shows a Rich live dashboard with
+current phase, spinner, elapsed time, event/message/tool-call counts, tokens, cache tokens,
+configured cost, and Pi-reported cost. Use `--no-live` for plain logs or `--live` to force
+it on.
 
 ## Outputs
 

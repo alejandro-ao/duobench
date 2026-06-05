@@ -26,6 +26,7 @@ from kcbench.impl_phase import run_impl_phase
 from kcbench.verify import verify_build
 from kcbench.pi_rpc import PiRpcError
 from kcbench.report import generate_report
+from kcbench.ui import make_ui
 
 REPO = Path(__file__).resolve().parents[2]
 PROMPTS = REPO / "prompts"
@@ -73,12 +74,13 @@ def run_condition_trial(
     dry_run: bool,
     plan_timeout: float,
     impl_timeout: float,
+    ui=None,
 ) -> tuple[TrialRecord, dict]:
     planner = cfg.model(cond.planner)
     implementer = cfg.model(cond.implementer)
     build_dir = trial_dir / "build"
     shots_dir = trial_dir / "screenshots"
-    print(f"  [{cond.id} trial {trial}] plan={cond.planner} impl={cond.implementer}")
+    (ui.log if ui else print)(f"  [{cond.id} trial {trial}] plan={cond.planner} impl={cond.implementer}")
 
     # --- plan ---
     if dry_run:
@@ -87,7 +89,7 @@ def run_condition_trial(
         plan_cost = 0.0
     else:
         plan_text, pc = run_plan_phase(planner, prompts["architect"], trial_dir,
-                                       timeout=plan_timeout, pin_temperature=True)
+                                       timeout=plan_timeout, pin_temperature=True, ui=ui)
         plan_cost = pc.usd
 
     # --- implement ---
@@ -97,12 +99,16 @@ def run_condition_trial(
         impl_status = "complete"
     else:
         impl = run_impl_phase(implementer, prompts["implement"], plan_text, build_dir,
-                              timeout=impl_timeout, pin_temperature=True)
+                              timeout=impl_timeout, pin_temperature=True, ui=ui)
         impl_cost = impl.cost.usd
         impl_status = impl.status
 
     # --- verify ---
+    if ui:
+        ui.start_phase("Verifying", "Playwright")
     vres = verify_build(build_dir, shots_dir)
+    if ui:
+        ui.end_phase("complete" if vres.boots_ok else "issues found")
     (trial_dir / "verify.json").write_text(json.dumps(vres.to_dict(), indent=2))
 
     record = TrialRecord(
@@ -149,6 +155,8 @@ def _main() -> None:
     rp.add_argument("--plan-timeout", type=float, default=600.0)
     rp.add_argument("--impl-timeout", type=float, default=1800.0)
     rp.add_argument("--judge-timeout", type=float, default=300.0)
+    rp.add_argument("--live", action=argparse.BooleanOptionalAction, default=None,
+                    help="enable/disable the Rich live dashboard (default: auto when attached to a TTY)")
     rp.add_argument("--debug", action="store_true", help="show full Python tracebacks on errors")
     rep = sub.add_parser("report", help="generate/re-generate report.html for an existing run")
     rep.add_argument("run_dir", type=str)
@@ -174,16 +182,18 @@ def _main() -> None:
     run_dir = Path(args.out) / ts
     cond_root = run_dir / "conditions"
     cond_root.mkdir(parents=True, exist_ok=True)
-    print("\n=== kimi-claude-bench ===")
-    print(f"mode: {'DRY RUN (no model/API calls)' if args.dry_run else 'REAL RUN'}")
-    print(f"run dir: {run_dir}")
-    print(f"trials per condition: {args.trials}")
-    print("conditions:")
+    ui = make_ui(args.live)
+    ui.start_run(run_dir=run_dir, conditions=conditions, trials=args.trials, dry_run=args.dry_run)
+    ui.log("\n=== kimi-claude-bench ===")
+    ui.log(f"mode: {'DRY RUN (no model/API calls)' if args.dry_run else 'REAL RUN'}")
+    ui.log(f"run dir: {run_dir}")
+    ui.log(f"trials per condition: {args.trials}")
+    ui.log("conditions:")
     for c in conditions:
-        print(f"  - {c.id}: planner={c.planner} implementer={c.implementer}")
+        ui.log(f"  - {c.id}: planner={c.planner} implementer={c.implementer}")
     if not args.dry_run:
-        print("\nTip: if this is your first run, `kcbench run --dry-run` validates the pipeline without API spend.")
-    print()
+        ui.log("\nTip: if this is your first run, `kcbench run --dry-run` validates the pipeline without API spend.")
+    ui.log("")
 
     # --- phase 1: plan + implement + verify per condition×trial ---
     records: list[TrialRecord] = []
@@ -196,12 +206,13 @@ def _main() -> None:
                 cfg, cond, trial, trial_dir, prompts,
                 dry_run=args.dry_run,
                 plan_timeout=args.plan_timeout, impl_timeout=args.impl_timeout,
+                ui=ui,
             )
             records.append(rec)
             metas.append(meta)
 
     # --- phase 2: judge panel over every build ---
-    print("judging...")
+    ui.log("judging...")
     for rec, meta in zip(records, metas):
         if args.dry_run:
             # canned scores so the wiring runs without real judges
@@ -219,6 +230,7 @@ def _main() -> None:
             cfg, prompts["judge"], Path(meta["build_dir"]),
             meta["smoke_summary"], meta["screenshots"], timeout=args.judge_timeout,
             transcripts_dir=trial_dir / "judge-transcripts",
+            ui=ui,
         )
         rec.per_judge = {
             s.judge: {d: getattr(s, d) for d in DIMENSIONS} for s in scores if s.error is None
@@ -242,7 +254,12 @@ def _main() -> None:
     for f in written + [run_dir / "results.json"]:
         shutil.copy(f, top_results / f.name)
 
+    if ui:
+        ui.start_phase("Generating report", "HTML")
     report_path = generate_report(run_dir)
+    if ui:
+        ui.end_phase("complete")
+        ui.stop()
 
     print(f"\ndone. results.json + {len(written)} chart/csv files in {results_dir}")
     print(f"report: {report_path}")

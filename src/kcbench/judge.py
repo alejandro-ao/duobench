@@ -122,6 +122,7 @@ def judge_build(
     *,
     timeout: float = 300.0,
     transcript_path: Path | None = None,
+    ui=None,
 ) -> JudgeScore:
     prompt = (
         judge_prompt_template
@@ -130,7 +131,9 @@ def judge_build(
     )
     images = _encode_images(screenshots)
     transcript = new_transcript("judge", judge_model)
-    with PiSession(cwd=Path.cwd(), enable_tools=False) as s:
+    if ui:
+        ui.start_phase("Judging", judge_key)
+    with PiSession(cwd=Path.cwd(), enable_tools=False, event_callback=getattr(ui, "on_rpc_event", None)) as s:
         s.set_model(judge_model.provider, judge_model.model_id)
         s.set_thinking("off")  # determinism best-effort
         try:
@@ -151,15 +154,21 @@ def judge_build(
             transcript.notes = [str(e)]
             if transcript_path:
                 transcript.write(transcript_path)
+            if ui:
+                ui.end_phase("error")
             return JudgeScore(judge_key, 0, 0, 0, error=str(e))
     cost = compute_cost(result.usage, judge_model)
     transcript.add_turn(kind="prompt", prompt=prompt, result=result, cost=cost, started_at=started, ended_at=ended)
+    if ui:
+        ui.add_turn_result(result.usage, cost.usd, cost.reported_usd)
     score = _parse_scores(result.text, judge_key)
     transcript.status = "complete" if score.error is None else "error"
     if score.error:
         transcript.notes = [score.error]
     if transcript_path:
         transcript.write(transcript_path)
+    if ui:
+        ui.end_phase(transcript.status)
     return score
 
 
@@ -172,6 +181,7 @@ def judge_panel(
     *,
     timeout: float = 300.0,
     transcripts_dir: Path | None = None,
+    ui=None,
 ) -> list[JudgeScore]:
     """Run every configured judge over one build."""
     source = collect_source(build_dir)
@@ -184,6 +194,7 @@ def judge_panel(
                 model, judge_key, judge_prompt_template,
                 source, smoke_summary, screenshots, timeout=timeout,
                 transcript_path=transcript_path,
+                ui=ui,
             )
         )
     return scores

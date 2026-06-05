@@ -54,6 +54,7 @@ def run_impl_phase(
     *,
     timeout: float = 1800.0,
     pin_temperature: bool = False,
+    ui=None,
 ) -> ImplResult:
     """Build the WebOS into build_dir. Accumulates usage across the multi-turn loop."""
     build_dir.mkdir(parents=True, exist_ok=True)
@@ -66,8 +67,10 @@ def run_impl_phase(
     notes: list[str] = []
 
     transcript = new_transcript("implementer", implementer)
+    if ui:
+        ui.start_phase("Implementing", implementer.key)
 
-    with PiSession(cwd=build_dir, enable_tools=True) as s:
+    with PiSession(cwd=build_dir, enable_tools=True, event_callback=getattr(ui, "on_rpc_event", None)) as s:
         s.set_model(implementer.provider, implementer.model_id)
         if pin_temperature:
             s.set_thinking("off")
@@ -79,6 +82,8 @@ def run_impl_phase(
             total.add(result.usage)
             turn_cost = compute_cost(result.usage, implementer)
             transcript.add_turn(kind="prompt", prompt=prompt, result=result, cost=turn_cost, started_at=started, ended_at=ended)
+            if ui:
+                ui.add_turn_result(result.usage, turn_cost.usd, turn_cost.reported_usd)
             final_text = result.text
             if _looks_done(result.text):
                 status = "complete"
@@ -91,6 +96,8 @@ def run_impl_phase(
                     total.add(result.usage)
                     turn_cost = compute_cost(result.usage, implementer)
                     transcript.add_turn(kind="follow_up", prompt=_CONTINUE_MSG, result=result, cost=turn_cost, started_at=started, ended_at=ended)
+                    if ui:
+                        ui.add_turn_result(result.usage, turn_cost.usd, turn_cost.reported_usd)
                     final_text = result.text
                     if _looks_done(result.text):
                         status = "complete"
@@ -109,6 +116,8 @@ def run_impl_phase(
     transcript.status = status
     transcript.notes = notes
     transcript.write(build_dir.parent / "implementer-transcript.json")
+    if ui:
+        ui.end_phase(status)
 
     return ImplResult(
         cost=compute_cost(total, implementer),

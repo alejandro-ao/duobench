@@ -16,6 +16,7 @@ import json
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Empty, Queue
@@ -109,12 +110,14 @@ class PiSession:
         startup_timeout: float = 30.0,
         pi_bin: str = "pi",
         extra_args: list[str] | None = None,
+        event_callback: Callable[[dict], None] | None = None,
     ) -> None:
         self.cwd = str(cwd)
         self.enable_tools = enable_tools
         self.startup_timeout = startup_timeout
         self.pi_bin = pi_bin
         self.extra_args = extra_args or []
+        self.event_callback = event_callback
         self._proc: subprocess.Popen | None = None
         self._events: "Queue[dict]" = Queue()
         self._reader: threading.Thread | None = None
@@ -234,6 +237,7 @@ class PiSession:
                     )
                 continue
             if ev.get("type") == "response" and ev.get("command") == command:
+                self._emit_event(ev)
                 # re-queue any non-matching events we pulled
                 for p in pending:
                     self._events.put(p)
@@ -258,6 +262,7 @@ class PiSession:
                     )
                 continue
 
+            self._emit_event(ev)
             etype = ev.get("type")
             if etype == "agent_end":
                 messages = ev.get("messages", []) or []
@@ -288,3 +293,11 @@ class PiSession:
                 )
 
         raise PiRpcError(f"turn exceeded wall-clock timeout of {timeout}s")
+
+    def _emit_event(self, ev: dict) -> None:
+        if not self.event_callback:
+            return
+        try:
+            self.event_callback(ev)
+        except Exception:
+            pass

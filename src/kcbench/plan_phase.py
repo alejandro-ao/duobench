@@ -23,11 +23,14 @@ def run_plan_phase(
     *,
     timeout: float = 600.0,
     pin_temperature: bool = False,
+    ui=None,
 ) -> tuple[str, PhaseCost]:
     """Run the planner; write plan.md to out_dir. Returns (plan_text, cost)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     transcript = new_transcript("planner", planner)
-    with PiSession(cwd=out_dir, enable_tools=False) as s:
+    if ui:
+        ui.start_phase("Planning", planner.key)
+    with PiSession(cwd=out_dir, enable_tools=False, event_callback=getattr(ui, "on_rpc_event", None)) as s:
         s.set_model(planner.provider, planner.model_id)
         if pin_temperature:
             s.set_thinking("off")
@@ -46,6 +49,9 @@ def run_plan_phase(
     )
     transcript.status = "complete"
     transcript.write(out_dir / "planner-transcript.json")
+    if ui:
+        ui.add_turn_result(result.usage, cost.usd, cost.reported_usd)
+        ui.end_phase("complete")
 
     plan_path = out_dir / "plan.md"
     plan_path.write_text(result.text)

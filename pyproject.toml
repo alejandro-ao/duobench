@@ -9,6 +9,7 @@ dependencies = [
     "playwright>=1.49",
     "matplotlib>=3.9",
     "pillow>=11.0",
+    "rich>=13.9",
 ]
 
 [project.scripts]
