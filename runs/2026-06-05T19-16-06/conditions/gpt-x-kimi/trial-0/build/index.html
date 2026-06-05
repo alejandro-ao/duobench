@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vanilla WebOS</title>
+
+  <link rel="stylesheet" href="styles/base.css" />
+  <link rel="stylesheet" href="styles/desktop.css" />
+  <link rel="stylesheet" href="styles/windows.css" />
+  <link rel="stylesheet" href="styles/taskbar.css" />
+  <link rel="stylesheet" href="styles/apps.css" />
+  <link rel="stylesheet" href="styles/games.css" />
+  <link rel="stylesheet" href="styles/themes.css" />
+</head>
+<body>
+  <div id="os-root">
+    <div id="desktop"></div>
+    <div id="window-layer"></div>
+    <div id="taskbar"></div>
+  </div>
+
+  <!-- Utils -->
+  <script src="src/utils/dom.js"></script>
+  <script src="src/utils/storage.js"></script>
+  <script src="src/utils/geometry.js"></script>
+  <script src="src/utils/ids.js"></script>
+
+  <!-- Core -->
+  <script src="src/core/EventBus.js"></script>
+  <script src="src/core/SettingsStore.js"></script>
+  <script src="src/core/FileSystem.js"></script>
+  <script src="src/core/NotificationCenter.js"></script>
+  <script src="src/core/ContextMenu.js"></script>
+  <script src="src/core/OSWindow.js"></script>
+  <script src="src/core/WindowManager.js"></script>
+  <script src="src/core/Taskbar.js"></script>
+  <script src="src/core/Desktop.js"></script>
+  <script src="src/core/AppRegistry.js"></script>
+  <script src="src/core/OS.js"></script>
+
+  <!-- Apps -->
+  <script src="src/apps/file-manager.js"></script>
+  <script src="src/apps/text-editor.js"></script>
+  <script src="src/apps/calculator.js"></script>
+  <script src="src/apps/reminders.js"></script>
+  <script src="src/apps/settings.js"></script>
+
+  <!-- Games -->
+  <script src="src/games/snake.js"></script>
+  <script src="src/games/tetris.js"></script>
+  <script src="src/games/minesweeper.js"></script>
+
+  <!-- Main -->
+  <script src="src/main.js"></script>
+</body>
+</html>

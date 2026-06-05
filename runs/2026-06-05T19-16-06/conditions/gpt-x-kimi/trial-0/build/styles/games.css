@@ -1,0 +1,146 @@
+/* ============================================
+   Vanilla WebOS — Game Styles
+   ============================================ */
+
+.app.game {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 16px;
+  gap: 12px;
+}
+
+.game canvas {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--panel-solid);
+  image-rendering: pixelated;
+  max-width: 100%;
+  max-height: calc(100% - 80px);
+}
+
+.game-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.game-toolbar button {
+  padding: 8px 18px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  transition: filter var(--transition-fast);
+}
+
+.game-toolbar button:hover {
+  filter: brightness(1.1);
+}
+
+.game-stats {
+  display: flex;
+  gap: 20px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.game-stats span {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Snake specific */
+.snake-app canvas {
+  background: #0a0a0f;
+}
+
+/* Tetris specific layout */
+.tetris-app {
+  flex-direction: row !important;
+  align-items: flex-start !important;
+  justify-content: center !important;
+  gap: 16px;
+  padding: 12px;
+}
+
+.tetris-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.tetris-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 100px;
+}
+
+.tetris-box {
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  text-align: center;
+}
+
+.tetris-box h5 {
+  margin: 0 0 6px 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.tetris-box .tb-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.tetris-box canvas {
+  border: none;
+  background: transparent;
+  max-height: none;
+}
+
+.tetris-controls {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.6;
+  text-align: left;
+}
+
+@media (max-width: 700px) {
+  .tetris-app {
+    flex-direction: column !important;
+    align-items: center !important;
+  }
+
+  .tetris-side {
+    flex-direction: row !important;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}
+
+/* Minesweeper */
+.minesweeper-app canvas {
+  background: var(--panel-solid);
+}
+
+.minesweeper-app .game-toolbar {
+  margin-bottom: 4px;
+}
+
+.minesweeper-app select {
+  padding: 6px 10px;
+  font-size: 12px;
+}
