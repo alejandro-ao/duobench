@@ -85,14 +85,24 @@ key fails fast before any model is called.
 Each run writes `runs/<timestamp>/`:
 
 ```
+report.html       visual run report: builds, screenshots, agent threads, timing/tokens/cost
 conditions/<id>/trial-<n>/
-  plan.md          planner output (the handoff artifact)
-  build/           implementer's files (index.html at root)
-  screenshots/     desktop + per-app launch shots
-  verify.json      Playwright smoke signals
-  trial.json       record + judge meta
-results.json       aggregated scores
-results/           leaderboard, dimension-radar, cost-vs-quality, self-bias (PNG + CSV)
+  plan.md                    planner output (the handoff artifact)
+  planner-transcript.json    raw planner thread + timing/token/cost stats
+  implementer-transcript.json raw implementer turns + tool/message stats
+  judge-transcripts/         one raw judge thread per judge model
+  build/                     implementer's files (index.html at root)
+  screenshots/               desktop + per-app launch shots
+  verify.json                Playwright smoke signals
+  trial.json                 record + judge meta/scores
+results.json                 aggregated scores
+results/                     leaderboard, dimension-radar, cost-vs-quality, self-bias (PNG + CSV)
+```
+
+Regenerate a report for an existing run:
+
+```bash
+uv run kcbench report runs/<timestamp>
 ```
 
 Committed chart/CSV artifacts are also mirrored to top-level `results/`.

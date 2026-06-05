@@ -7,11 +7,13 @@ planner just writes a plan.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from kcbench.config import Model
 from kcbench.cost import PhaseCost, compute_cost
 from kcbench.pi_rpc import PiSession
+from kcbench.transcript import new_transcript
 
 
 def run_plan_phase(
@@ -24,12 +26,27 @@ def run_plan_phase(
 ) -> tuple[str, PhaseCost]:
     """Run the planner; write plan.md to out_dir. Returns (plan_text, cost)."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    transcript = new_transcript("planner", planner)
     with PiSession(cwd=out_dir, enable_tools=False) as s:
         s.set_model(planner.provider, planner.model_id)
         if pin_temperature:
             s.set_thinking("off")
+        started = time.time()
         result = s.prompt(architect_prompt, timeout=timeout)
+        ended = time.time()
+
+    cost = compute_cost(result.usage, planner)
+    transcript.add_turn(
+        kind="prompt",
+        prompt=architect_prompt,
+        result=result,
+        cost=cost,
+        started_at=started,
+        ended_at=ended,
+    )
+    transcript.status = "complete"
+    transcript.write(out_dir / "planner-transcript.json")
 
     plan_path = out_dir / "plan.md"
     plan_path.write_text(result.text)
-    return result.text, compute_cost(result.usage, planner)
+    return result.text, cost

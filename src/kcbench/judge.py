@@ -16,11 +16,14 @@ from __future__ import annotations
 import base64
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from kcbench.config import Config, Model
+from kcbench.cost import compute_cost
 from kcbench.pi_rpc import PiRpcError, PiSession
+from kcbench.transcript import new_transcript
 
 DIMENSIONS = ("architecture", "correctness", "visual_ux")
 _MAX_SOURCE_CHARS = 120_000           # cap concatenated source to stay within context
@@ -118,6 +121,7 @@ def judge_build(
     screenshots: list[str],
     *,
     timeout: float = 300.0,
+    transcript_path: Path | None = None,
 ) -> JudgeScore:
     prompt = (
         judge_prompt_template
@@ -125,6 +129,7 @@ def judge_build(
         .replace("{source}", source)
     )
     images = _encode_images(screenshots)
+    transcript = new_transcript("judge", judge_model)
     with PiSession(cwd=Path.cwd(), enable_tools=False) as s:
         s.set_model(judge_model.provider, judge_model.model_id)
         s.set_thinking("off")  # determinism best-effort
@@ -134,12 +139,28 @@ def judge_build(
                 s._send({"type": "prompt", "message": prompt, "images": images} if images
                          else {"type": "prompt", "message": prompt})
                 s._await_response("prompt", timeout=15.0)
+                started = time.time()
                 result = s._collect_until_agent_end(timeout=timeout)
+                ended = time.time()
             except PiRpcError:
+                started = time.time()
                 result = s.prompt(prompt, timeout=timeout)
+                ended = time.time()
         except PiRpcError as e:
+            transcript.status = "error"
+            transcript.notes = [str(e)]
+            if transcript_path:
+                transcript.write(transcript_path)
             return JudgeScore(judge_key, 0, 0, 0, error=str(e))
-    return _parse_scores(result.text, judge_key)
+    cost = compute_cost(result.usage, judge_model)
+    transcript.add_turn(kind="prompt", prompt=prompt, result=result, cost=cost, started_at=started, ended_at=ended)
+    score = _parse_scores(result.text, judge_key)
+    transcript.status = "complete" if score.error is None else "error"
+    if score.error:
+        transcript.notes = [score.error]
+    if transcript_path:
+        transcript.write(transcript_path)
+    return score
 
 
 def judge_panel(
@@ -150,16 +171,19 @@ def judge_panel(
     screenshots: list[str],
     *,
     timeout: float = 300.0,
+    transcripts_dir: Path | None = None,
 ) -> list[JudgeScore]:
     """Run every configured judge over one build."""
     source = collect_source(build_dir)
     scores: list[JudgeScore] = []
     for judge_key in cfg.judges:
         model = cfg.model(judge_key)
+        transcript_path = transcripts_dir / f"{judge_key}.json" if transcripts_dir else None
         scores.append(
             judge_build(
                 model, judge_key, judge_prompt_template,
                 source, smoke_summary, screenshots, timeout=timeout,
+                transcript_path=transcript_path,
             )
         )
     return scores

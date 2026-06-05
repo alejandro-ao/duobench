@@ -25,6 +25,7 @@ from kcbench.plan_phase import run_plan_phase
 from kcbench.impl_phase import run_impl_phase
 from kcbench.verify import verify_build
 from kcbench.pi_rpc import PiRpcError
+from kcbench.report import generate_report
 
 REPO = Path(__file__).resolve().parents[2]
 PROMPTS = REPO / "prompts"
@@ -149,7 +150,15 @@ def _main() -> None:
     rp.add_argument("--impl-timeout", type=float, default=1800.0)
     rp.add_argument("--judge-timeout", type=float, default=300.0)
     rp.add_argument("--debug", action="store_true", help="show full Python tracebacks on errors")
+    rep = sub.add_parser("report", help="generate/re-generate report.html for an existing run")
+    rep.add_argument("run_dir", type=str)
+    rep.add_argument("--debug", action="store_true", help="show full Python tracebacks on errors")
     args = ap.parse_args()
+
+    if args.cmd == "report":
+        report_path = generate_report(Path(args.run_dir))
+        print(f"report written: {report_path}")
+        return
 
     cfg = load_config(args.models_config, args.conditions_config)
     only = [c.strip() for c in args.conditions.split(",") if c.strip()] or None
@@ -199,15 +208,27 @@ def _main() -> None:
             for jk in cfg.judges:
                 rec.per_judge[jk] = {d: 6 for d in DIMENSIONS}
             rec.dimensions = {d: 6.0 for d in DIMENSIONS}
+            trial_dir = Path(meta["build_dir"]).parent
+            (trial_dir / "trial.json").write_text(json.dumps(
+                {"record": rec.__dict__, "meta": meta, "judge_scores": []},
+                indent=2, default=str,
+            ))
             continue
+        trial_dir = Path(meta["build_dir"]).parent
         scores = judge_panel(
             cfg, prompts["judge"], Path(meta["build_dir"]),
             meta["smoke_summary"], meta["screenshots"], timeout=args.judge_timeout,
+            transcripts_dir=trial_dir / "judge-transcripts",
         )
         rec.per_judge = {
             s.judge: {d: getattr(s, d) for d in DIMENSIONS} for s in scores if s.error is None
         }
         rec.dimensions = average_dimensions(scores)
+        trial_dir = Path(meta["build_dir"]).parent
+        (trial_dir / "trial.json").write_text(json.dumps(
+            {"record": rec.__dict__, "meta": meta, "judge_scores": [s.to_dict() for s in scores]},
+            indent=2, default=str,
+        ))
 
     # --- phase 3: aggregate + charts ---
     results = aggregate(records, cfg.judges)
@@ -221,7 +242,10 @@ def _main() -> None:
     for f in written + [run_dir / "results.json"]:
         shutil.copy(f, top_results / f.name)
 
+    report_path = generate_report(run_dir)
+
     print(f"\ndone. results.json + {len(written)} chart/csv files in {results_dir}")
+    print(f"report: {report_path}")
     print(f"copied to {top_results}/ for the video")
     # leaderboard preview
     ranked = sorted(results["conditions"].items(), key=lambda kv: kv[1]["quality"], reverse=True)

@@ -12,12 +12,14 @@ the agent to keep building until it signals completion.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from kcbench.config import Model
 from kcbench.cost import PhaseCost, compute_cost
 from kcbench.pi_rpc import PiRpcError, PiSession, Usage
+from kcbench.transcript import new_transcript
 
 # Heuristic completion markers the implementer is asked to emit when done.
 _DONE_MARKERS = ("build is complete", "build complete", "fully functional", "done building",
@@ -63,22 +65,32 @@ def run_impl_phase(
     final_text = ""
     notes: list[str] = []
 
+    transcript = new_transcript("implementer", implementer)
+
     with PiSession(cwd=build_dir, enable_tools=True) as s:
         s.set_model(implementer.provider, implementer.model_id)
         if pin_temperature:
             s.set_thinking("off")
         try:
+            started = time.time()
             result = s.prompt(prompt, timeout=timeout)
+            ended = time.time()
             turns += 1
             total.add(result.usage)
+            turn_cost = compute_cost(result.usage, implementer)
+            transcript.add_turn(kind="prompt", prompt=prompt, result=result, cost=turn_cost, started_at=started, ended_at=ended)
             final_text = result.text
             if _looks_done(result.text):
                 status = "complete"
             else:
                 for _ in range(_MAX_FOLLOW_UPS):
+                    started = time.time()
                     result = s.follow_up(_CONTINUE_MSG, timeout=timeout)
+                    ended = time.time()
                     turns += 1
                     total.add(result.usage)
+                    turn_cost = compute_cost(result.usage, implementer)
+                    transcript.add_turn(kind="follow_up", prompt=_CONTINUE_MSG, result=result, cost=turn_cost, started_at=started, ended_at=ended)
                     final_text = result.text
                     if _looks_done(result.text):
                         status = "complete"
@@ -93,6 +105,10 @@ def run_impl_phase(
     # If nothing was written, flag it (correctness will score it via verify anyway).
     if not (build_dir / "index.html").exists():
         notes.append("no index.html at build root after implementation")
+
+    transcript.status = status
+    transcript.notes = notes
+    transcript.write(build_dir.parent / "implementer-transcript.json")
 
     return ImplResult(
         cost=compute_cost(total, implementer),
