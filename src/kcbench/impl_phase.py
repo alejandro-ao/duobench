@@ -70,6 +70,11 @@ def run_impl_phase(
     if ui:
         ui.start_phase("Implementing", implementer.key)
 
+    deadline = time.monotonic() + timeout
+
+    def remaining_timeout() -> float:
+        return max(1.0, deadline - time.monotonic())
+
     with PiSession(
         cwd=build_dir,
         enable_tools=True,
@@ -81,7 +86,7 @@ def run_impl_phase(
             s.set_thinking("off")
         try:
             started = time.time()
-            result = s.prompt(prompt, timeout=timeout)
+            result = s.prompt(prompt, timeout=remaining_timeout())
             ended = time.time()
             turns += 1
             total.add(result.usage)
@@ -94,8 +99,12 @@ def run_impl_phase(
                 status = "complete"
             else:
                 for _ in range(_MAX_FOLLOW_UPS):
+                    if time.monotonic() >= deadline:
+                        status = "timeout"
+                        notes.append(f"implementation exceeded total wall-clock timeout of {timeout}s")
+                        break
                     started = time.time()
-                    result = s.follow_up(_CONTINUE_MSG, timeout=timeout)
+                    result = s.follow_up(_CONTINUE_MSG, timeout=remaining_timeout())
                     ended = time.time()
                     turns += 1
                     total.add(result.usage)
