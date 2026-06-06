@@ -14,6 +14,7 @@ import json
 import shutil
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from importlib import resources
@@ -31,6 +32,8 @@ from duobench.report import generate_report
 from duobench.ui import make_ui
 from duobench.fingerprint import make_benchmark_fingerprint
 
+AUTO_PARALLEL_WORKERS = 2
+
 
 @dataclass(frozen=True)
 class SharedPlan:
@@ -39,6 +42,31 @@ class SharedPlan:
     plan_text: str
     cost_usd: float
     source_dir: Path
+
+
+class LogOnlyUI:
+    """UI proxy for worker threads: keep logs, suppress single-phase counters."""
+
+    def __init__(self, ui) -> None:
+        self._ui = ui
+
+    def log(self, message: str) -> None:
+        if self._ui:
+            self._ui.log(message)
+        else:
+            print(message, flush=True)
+
+    def start_phase(self, name: str, model: str = "") -> None:
+        pass
+
+    def end_phase(self, status: str = "complete") -> None:
+        pass
+
+    def add_turn_result(self, usage, cost_usd: float, reported_usd: float = 0.0) -> None:
+        pass
+
+    def on_rpc_event(self, ev: dict) -> None:
+        pass
 
 
 def _load_prompt(name: str) -> str:
@@ -89,6 +117,22 @@ def _unique_planners(conditions: list[Condition]) -> list[str]:
             seen.add(cond.planner)
             planners.append(cond.planner)
     return planners
+
+
+def resolve_parallel(value: str, *, auto_default: int = AUTO_PARALLEL_WORKERS) -> int:
+    if value == "auto":
+        return max(1, auto_default)
+    try:
+        workers = int(value)
+    except ValueError as e:
+        raise ConfigError("--parallel must be 'auto' or a positive integer") from e
+    if workers < 1:
+        raise ConfigError("--parallel must be 'auto' or a positive integer")
+    return workers
+
+
+def _phase_ui(ui, parallel_workers: int):
+    return ui if parallel_workers <= 1 else LogOnlyUI(ui)
 
 
 def run_shared_plan(
@@ -146,13 +190,20 @@ def prepare_shared_plans(
     *,
     dry_run: bool,
     plan_timeout: float,
+    parallel_workers: int = 1,
     ui=None,
 ) -> dict[tuple[str, int], SharedPlan]:
-    plans: dict[tuple[str, int], SharedPlan] = {}
     plan_root = run_dir / "shared-plans"
+    jobs: list[tuple[int, str, int, Path]] = []
     for trial in range(trials):
         for planner_key in _unique_planners(conditions):
             plan_dir = plan_root / _safe_path_part(planner_key) / f"trial-{trial}"
+            jobs.append((len(jobs), planner_key, trial, plan_dir))
+
+    plans: dict[tuple[str, int], SharedPlan] = {}
+    phase_ui = _phase_ui(ui, parallel_workers)
+    if parallel_workers <= 1 or len(jobs) <= 1:
+        for _, planner_key, trial, plan_dir in jobs:
             plans[(planner_key, trial)] = run_shared_plan(
                 cfg,
                 planner_key,
@@ -161,8 +212,28 @@ def prepare_shared_plans(
                 prompts,
                 dry_run=dry_run,
                 plan_timeout=plan_timeout,
-                ui=ui,
+                ui=phase_ui,
             )
+        return plans
+
+    with ThreadPoolExecutor(max_workers=min(parallel_workers, len(jobs))) as pool:
+        futures = {
+            pool.submit(
+                run_shared_plan,
+                cfg,
+                planner_key,
+                trial,
+                plan_dir,
+                prompts,
+                dry_run=dry_run,
+                plan_timeout=plan_timeout,
+                ui=phase_ui,
+            ): (planner_key, trial)
+            for _, planner_key, trial, plan_dir in jobs
+        }
+        for fut in as_completed(futures):
+            planner_key, trial = futures[fut]
+            plans[(planner_key, trial)] = fut.result()
     return plans
 
 
@@ -264,6 +335,77 @@ def run_condition_trial(
     return record, record_meta
 
 
+def run_condition_trials(
+    cfg: Config,
+    conditions: list[Condition],
+    trials: int,
+    cond_root: Path,
+    prompts: dict[str, str],
+    shared_plans: dict[tuple[str, int], SharedPlan],
+    *,
+    dry_run: bool,
+    plan_timeout: float,
+    impl_timeout: float,
+    judge_timeout: float,
+    parallel_workers: int = 1,
+    ui=None,
+) -> tuple[list[TrialRecord], list[dict]]:
+    jobs: list[tuple[int, Condition, int, Path]] = []
+    for cond in conditions:
+        for trial in range(trials):
+            trial_dir = cond_root / cond.id / f"trial-{trial}"
+            trial_dir.mkdir(parents=True, exist_ok=True)
+            jobs.append((len(jobs), cond, trial, trial_dir))
+
+    phase_ui = _phase_ui(ui, parallel_workers)
+
+    def run_job(cond: Condition, trial: int, trial_dir: Path) -> tuple[int, TrialRecord, dict]:
+        if ui:
+            ui.start_trial(cond.id, trial, "running")
+        try:
+            rec, meta = run_condition_trial(
+                cfg,
+                cond,
+                trial,
+                trial_dir,
+                prompts,
+                shared_plan=shared_plans[(cond.planner, trial)],
+                dry_run=dry_run,
+                plan_timeout=plan_timeout,
+                impl_timeout=impl_timeout,
+                judge_timeout=judge_timeout,
+                ui=phase_ui,
+            )
+            if ui:
+                ui.finish_trial(cond.id, trial, "built")
+            return rec.trial, rec, meta
+        except Exception:
+            if ui:
+                ui.finish_trial(cond.id, trial, "failed")
+            raise
+
+    results: list[tuple[int, TrialRecord, dict]] = []
+    if parallel_workers <= 1 or len(jobs) <= 1:
+        for idx, cond, trial, trial_dir in jobs:
+            _, rec, meta = run_job(cond, trial, trial_dir)
+            results.append((idx, rec, meta))
+    else:
+        with ThreadPoolExecutor(max_workers=min(parallel_workers, len(jobs))) as pool:
+            futures = {
+                pool.submit(run_job, cond, trial, trial_dir): idx
+                for idx, cond, trial, trial_dir in jobs
+            }
+            for fut in as_completed(futures):
+                idx = futures[fut]
+                _, rec, meta = fut.result()
+                results.append((idx, rec, meta))
+
+    results.sort(key=lambda item: item[0])
+    records = [rec for _, rec, _ in results]
+    metas = [meta for _, _, meta in results]
+    return records, metas
+
+
 def _main() -> None:
     ap = argparse.ArgumentParser(
         prog="duobench",
@@ -287,6 +429,8 @@ def _main() -> None:
     rp.add_argument("--plan-timeout", type=float, default=600.0)
     rp.add_argument("--impl-timeout", type=float, default=1800.0)
     rp.add_argument("--judge-timeout", type=float, default=300.0)
+    rp.add_argument("--parallel", type=str, default="auto",
+                    help="planner/build concurrency: 'auto' (default) or a positive integer; use 1 for serial")
     rp.add_argument("--live", action=argparse.BooleanOptionalAction, default=None,
                     help="enable/disable the Rich live dashboard (default: auto when attached to a TTY)")
     rp.add_argument("--debug", action="store_true", help="show full Python tracebacks on errors")
@@ -303,6 +447,7 @@ def _main() -> None:
     cfg = load_config(args.models_config, args.conditions_config)
     only = [c.strip() for c in args.conditions.split(",") if c.strip()] or None
     conditions = select_conditions(cfg, only)
+    parallel_workers = resolve_parallel(args.parallel)
 
     prompts = {
         "architect": _load_prompt("architect.md"),
@@ -320,6 +465,7 @@ def _main() -> None:
     ui.log(f"mode: {'DRY RUN (no model/API calls)' if args.dry_run else 'REAL RUN'}")
     ui.log(f"run dir: {run_dir}")
     ui.log(f"trials per condition: {args.trials}")
+    ui.log(f"parallel workers: {args.parallel} ({parallel_workers} max)")
     ui.log("conditions:")
     for c in conditions:
         ui.log(f"  - {c.id}: planner={c.planner} implementer={c.implementer}")
@@ -337,27 +483,24 @@ def _main() -> None:
         prompts,
         dry_run=args.dry_run,
         plan_timeout=args.plan_timeout,
+        parallel_workers=parallel_workers,
         ui=ui,
     )
 
-    records: list[TrialRecord] = []
-    metas: list[dict] = []
-    for cond in conditions:
-        for trial in range(args.trials):
-            trial_dir = cond_root / cond.id / f"trial-{trial}"
-            trial_dir.mkdir(parents=True, exist_ok=True)
-            ui.start_trial(cond.id, trial, "running")
-            rec, meta = run_condition_trial(
-                cfg, cond, trial, trial_dir, prompts,
-                shared_plan=shared_plans[(cond.planner, trial)],
-                dry_run=args.dry_run,
-                plan_timeout=args.plan_timeout, impl_timeout=args.impl_timeout,
-                judge_timeout=args.judge_timeout,
-                ui=ui,
-            )
-            ui.finish_trial(cond.id, trial, "built")
-            records.append(rec)
-            metas.append(meta)
+    records, metas = run_condition_trials(
+        cfg,
+        conditions,
+        args.trials,
+        cond_root,
+        prompts,
+        shared_plans,
+        dry_run=args.dry_run,
+        plan_timeout=args.plan_timeout,
+        impl_timeout=args.impl_timeout,
+        judge_timeout=args.judge_timeout,
+        parallel_workers=parallel_workers,
+        ui=ui,
+    )
 
     # --- phase 2: judge panel over every build ---
     ui.log("judging...")
