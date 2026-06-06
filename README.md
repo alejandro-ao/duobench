@@ -87,6 +87,7 @@ uv run duobench run --trials 3
 |------|---------|---------|
 | `--trials N` | `1` | Trials per condition (variance / error bars) |
 | `--conditions a,b,c` | all | Comma-separated condition ids to run |
+| `--parallel auto\|N` | `auto` | Planner/build concurrency (`auto` currently caps at 2 workers; use `1` for serial) |
 | `--dry-run` | off | Stub all model calls + canned judge scores |
 | `--out DIR` | `runs` | Output root |
 | `--models-config` | `config/models.yaml` | Model registry |
@@ -176,6 +177,10 @@ Within a run, planner outputs are shared by `(planner, trial)`: if `kimi-solo` a
 `kimi-x-gpt` both use the same Kimi planner for trial 0, duobench calls Kimi once, then
 copies that plan into each condition's trial directory. Condition-level cost still includes
 the planner cost for fair comparisons.
+
+Planner jobs and condition build/verify jobs run with bounded concurrency by default
+(`--parallel auto`, currently up to 2 workers). Use `--parallel 1` for fully serial runs or
+`--parallel N` to set an explicit global cap. Judging remains serial for now.
 
 Each run writes `runs/<timestamp>/`:
 
