@@ -62,6 +62,11 @@ def _transcript_block(title: str, path: Path) -> str:
     stats = tr.get("stats", {})
     turns = tr.get("turns", []) or []
     parts = ["<div class='card'>", f"<h3>{html.escape(title)} <span class='pill'>{html.escape(tr.get('model_key',''))}</span> <span class='pill'>{html.escape(tr.get('status',''))}</span></h3>", _metrics(stats)]
+    pi_session = tr.get("pi_session") or {}
+    if pi_session:
+        name = html.escape(str(pi_session.get("name") or pi_session.get("requested_name") or ""))
+        session_file = html.escape(str(pi_session.get("session_file") or ""))
+        parts.append(f"<p class='muted'>Pi session: <code>{name}</code>{' · <code>' + session_file + '</code>' if session_file else ''}</p>")
     for i, turn in enumerate(turns, 1):
         prompt = html.escape(str(turn.get("prompt", "")))
         text = html.escape(str(turn.get("assistant_text", "")))

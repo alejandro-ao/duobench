@@ -55,6 +55,8 @@ def run_impl_phase(
     timeout: float = 1800.0,
     pin_temperature: bool = False,
     thinking_level: str | None = None,
+    persist_pi_session: bool = False,
+    session_name: str | None = None,
     ui=None,
 ) -> ImplResult:
     """Build the WebOS into build_dir. Accumulates usage across the multi-turn loop."""
@@ -66,6 +68,7 @@ def run_impl_phase(
     status = "stopped"
     final_text = ""
     notes: list[str] = []
+    session_state: dict = {}
 
     transcript = new_transcript("implementer", implementer)
     if ui:
@@ -81,6 +84,8 @@ def run_impl_phase(
         enable_tools=True,
         event_callback=getattr(ui, "on_rpc_event", None),
         raw_events_path=build_dir.parent / "implementer-events.jsonl",
+        persist_session=persist_pi_session,
+        session_name=session_name,
     ) as s:
         s.set_model(implementer.provider, implementer.model_id)
         if thinking_level is not None:
@@ -125,6 +130,10 @@ def run_impl_phase(
         except PiRpcError as e:
             status = "timeout"
             notes.append(f"pi_rpc error/timeout: {e}")
+        try:
+            session_state = s.get_state()
+        except Exception:
+            session_state = {}
 
     # If nothing was written, flag it (correctness will score it via verify anyway).
     if not (build_dir / "index.html").exists():
@@ -132,6 +141,7 @@ def run_impl_phase(
 
     transcript.status = status
     transcript.notes = notes
+    transcript.pi_session = _session_metadata(session_state, session_name)
     transcript.write(build_dir.parent / "implementer-transcript.json")
     if ui:
         ui.end_phase(status)
@@ -143,3 +153,14 @@ def run_impl_phase(
         final_text=final_text,
         notes=notes,
     )
+
+
+def _session_metadata(state: dict, requested_name: str | None) -> dict | None:
+    if not state and not requested_name:
+        return None
+    return {
+        "requested_name": requested_name,
+        "name": state.get("sessionName") or requested_name,
+        "session_file": state.get("sessionFile"),
+        "session_id": state.get("sessionId"),
+    }

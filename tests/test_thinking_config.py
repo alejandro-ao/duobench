@@ -9,9 +9,11 @@ from duobench.run import run_shared_plan
 class _FakeProc:
     def __init__(self):
         self.stdin = io.StringIO()
+        self.stdout = iter(())
+        self.stderr = iter(())
 
     def poll(self):
-        return None
+        return 0
 
 
 def test_packaged_default_thinking_levels(tmp_path, monkeypatch):
@@ -26,12 +28,35 @@ def test_packaged_default_thinking_levels(tmp_path, monkeypatch):
 def test_pi_session_sends_rpc_set_thinking_level_command():
     session = PiSession(cwd=".")
     fake_proc = _FakeProc()
+    fake_proc.poll = lambda: None
     session._proc = fake_proc
     session._events.put({"type": "response", "command": "set_thinking_level", "success": True})
 
     session.set_thinking("high")
 
     assert fake_proc.stdin.getvalue() == '{"type": "set_thinking_level", "level": "high"}\n'
+
+
+def test_pi_session_persistence_controls_no_session_flag(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_popen(args, **kwargs):
+        captured["args"] = args
+        return _FakeProc()
+
+    monkeypatch.setattr("duobench.pi_rpc.subprocess.Popen", fake_popen)
+
+    with PiSession(cwd=tmp_path, persist_session=True, session_name="duobench webos test"):
+        pass
+
+    assert "--no-session" not in captured["args"]
+    assert captured["args"][:3] == ["pi", "--mode", "rpc"]
+    assert captured["args"][3:5] == ["--name", "duobench webos test"]
+
+    with PiSession(cwd=tmp_path, persist_session=False):
+        pass
+
+    assert "--no-session" in captured["args"]
 
 
 def test_shared_plan_passes_configured_thinking_level_to_plan_phase(tmp_path, monkeypatch):

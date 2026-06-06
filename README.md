@@ -97,6 +97,7 @@ uv run duobench run --trials 3
 | `--planners a,b` | off | Planner keys for a rectangular matrix; use with `--implementers` |
 | `--implementers a,b` | off | Implementer keys for a rectangular matrix; use with `--planners` |
 | `--parallel auto\|all\|N` | `auto` | Planner/build concurrency (`auto` caps at 2 workers; `all` runs every job in each phase; use `1` for serial) |
+| `--pi-sessions` / `--no-pi-sessions` | on | Save real Pi RPC sessions in Pi's default session store with descriptive names |
 | `--dry-run` | off | Stub all model calls with synthetic plans, builds, costs, transcripts, and varied judge scores |
 | `--out DIR` | `runs` | Output root |
 | `--models-config` | `config/models.yaml` | Model registry |
@@ -191,6 +192,21 @@ open runs/<timestamp>/report.html
 Dry-run now writes synthetic shared plans, generated WebOS files, transcripts, non-zero
 configured costs from `models.yaml` pricing, varied judge scores, `results.json`, chart CSVs,
 PNGs, and the same `report.html` a real run writes.
+
+## Pi sessions
+
+For real runs, duobench saves each planner, implementer, and judge Pi RPC session in Pi's
+default session store (normally under `~/.pi/agent/sessions/`) so you can inspect them with
+Pi's own session UI. Sessions are named like:
+
+```text
+duobench webos 2026-06-06T19-05-24 planner kimi-k2.6 trial-0
+duobench webos 2026-06-06T19-05-24 implementer gpt-x-kimi kimi-k2.6 trial-0
+duobench webos 2026-06-06T19-05-24 judge gpt-x-kimi panel trial-0 judge=gpt-5.5
+```
+
+Use `--no-pi-sessions` to disable Pi session persistence. Dry runs never create Pi sessions.
+Duobench still writes its own transcripts/events under the timestamped run directory.
 
 ## Outputs
 

@@ -113,6 +113,8 @@ class PiSession:
         extra_args: list[str] | None = None,
         event_callback: Callable[[dict], None] | None = None,
         raw_events_path: str | Path | None = None,
+        persist_session: bool = False,
+        session_name: str | None = None,
     ) -> None:
         self.cwd = str(cwd)
         self.enable_tools = enable_tools
@@ -121,6 +123,8 @@ class PiSession:
         self.extra_args = extra_args or []
         self.event_callback = event_callback
         self.raw_events_path = Path(raw_events_path) if raw_events_path else None
+        self.persist_session = persist_session
+        self.session_name = session_name
         self._raw_events_lock = threading.Lock()
         self._proc: subprocess.Popen | None = None
         self._events: "Queue[dict]" = Queue()
@@ -134,7 +138,11 @@ class PiSession:
     # -- lifecycle --
 
     def __enter__(self) -> "PiSession":
-        args = [self.pi_bin, "--mode", "rpc", "--no-session"]
+        args = [self.pi_bin, "--mode", "rpc"]
+        if not self.persist_session:
+            args.append("--no-session")
+        if self.session_name:
+            args += ["--name", self.session_name]
         if not self.enable_tools:
             args.append("--no-tools")
         args += self.extra_args
@@ -235,6 +243,14 @@ class PiSession:
             self._await_response("set_thinking_level", timeout=timeout)
         except PiRpcError:
             pass  # not all models/providers support it; non-fatal
+
+    def get_state(self, *, timeout: float = 10.0) -> dict:
+        self._send({"type": "get_state"})
+        resp = self._await_response("get_state", timeout=timeout)
+        if not resp.get("success"):
+            raise PiRpcError(f"get_state failed: {resp.get('error', 'unknown error')}")
+        data = resp.get("data")
+        return data if isinstance(data, dict) else {}
 
     def prompt(self, message: str, *, timeout: float) -> TurnResult:
         self._send({"type": "prompt", "message": message})

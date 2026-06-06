@@ -24,6 +24,8 @@ def run_plan_phase(
     timeout: float = 600.0,
     pin_temperature: bool = False,
     thinking_level: str | None = None,
+    persist_pi_session: bool = False,
+    session_name: str | None = None,
     ui=None,
 ) -> tuple[str, PhaseCost]:
     """Run the planner; write plan.md to out_dir. Returns (plan_text, cost)."""
@@ -36,6 +38,8 @@ def run_plan_phase(
         enable_tools=False,
         event_callback=getattr(ui, "on_rpc_event", None),
         raw_events_path=out_dir / "planner-events.jsonl",
+        persist_session=persist_pi_session,
+        session_name=session_name,
     ) as s:
         s.set_model(planner.provider, planner.model_id)
         if thinking_level is not None:
@@ -45,6 +49,10 @@ def run_plan_phase(
         started = time.time()
         result = s.prompt(architect_prompt, timeout=timeout)
         ended = time.time()
+        try:
+            session_state = s.get_state()
+        except Exception:
+            session_state = {}
 
     cost = compute_cost(result.usage, planner)
     transcript.add_turn(
@@ -56,6 +64,7 @@ def run_plan_phase(
         ended_at=ended,
     )
     transcript.status = "complete"
+    transcript.pi_session = _session_metadata(session_state, session_name)
     transcript.write(out_dir / "planner-transcript.json")
     if ui:
         ui.add_turn_result(result.usage, cost.usd, cost.reported_usd)
@@ -64,3 +73,14 @@ def run_plan_phase(
     plan_path = out_dir / "plan.md"
     plan_path.write_text(result.text)
     return result.text, cost
+
+
+def _session_metadata(state: dict, requested_name: str | None) -> dict | None:
+    if not state and not requested_name:
+        return None
+    return {
+        "requested_name": requested_name,
+        "name": state.get("sessionName") or requested_name,
+        "session_file": state.get("sessionFile"),
+        "session_id": state.get("sessionId"),
+    }

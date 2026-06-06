@@ -40,7 +40,7 @@ def test_prepare_shared_plans_runs_independent_planners_concurrently(tmp_path, m
     prompts = {"architect": "plan", "implement": "implement", "judge": "judge"}
     barrier = threading.Barrier(2)
 
-    def fake_run_shared_plan(cfg, planner_key, trial, plan_dir, prompts, *, dry_run, plan_timeout, ui=None):
+    def fake_run_shared_plan(cfg, planner_key, trial, plan_dir, prompts, *, dry_run, plan_timeout, ui=None, **kwargs):
         barrier.wait(timeout=2)
         plan_dir.mkdir(parents=True, exist_ok=True)
         (plan_dir / "plan.md").write_text(f"plan from {planner_key}")

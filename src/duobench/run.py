@@ -368,6 +368,14 @@ def _phase_ui(ui, parallel_workers: int):
     return ui if parallel_workers <= 1 else LogOnlyUI(ui)
 
 
+def _pi_session_name(run_label: str, role: str, model_key: str, *, trial: int, condition_id: str | None = None) -> str:
+    parts = ["duobench", "webos", run_label, role]
+    if condition_id:
+        parts.append(condition_id)
+    parts += [model_key, f"trial-{trial}"]
+    return " ".join(parts)
+
+
 def run_shared_plan(
     cfg: Config,
     planner_key: str,
@@ -377,6 +385,8 @@ def run_shared_plan(
     *,
     dry_run: bool,
     plan_timeout: float,
+    save_pi_sessions: bool = False,
+    run_label: str = "run",
     ui=None,
 ) -> SharedPlan:
     planner = cfg.model(planner_key)
@@ -406,6 +416,8 @@ def run_shared_plan(
             timeout=plan_timeout,
             pin_temperature=True,
             thinking_level=planner.thinking_level,
+            persist_pi_session=save_pi_sessions,
+            session_name=_pi_session_name(run_label, "planner", planner_key, trial=trial),
             ui=ui,
         )
         plan_cost = pc.usd
@@ -437,6 +449,8 @@ def prepare_shared_plans(
     dry_run: bool,
     plan_timeout: float,
     parallel_workers: int = 1,
+    save_pi_sessions: bool = False,
+    run_label: str = "run",
     ui=None,
 ) -> dict[tuple[str, int], SharedPlan]:
     plan_root = run_dir / "shared-plans"
@@ -458,6 +472,8 @@ def prepare_shared_plans(
                 prompts,
                 dry_run=dry_run,
                 plan_timeout=plan_timeout,
+                save_pi_sessions=save_pi_sessions,
+                run_label=run_label,
                 ui=phase_ui,
             )
         return plans
@@ -473,6 +489,8 @@ def prepare_shared_plans(
                 prompts,
                 dry_run=dry_run,
                 plan_timeout=plan_timeout,
+                save_pi_sessions=save_pi_sessions,
+                run_label=run_label,
                 ui=phase_ui,
             ): (planner_key, trial)
             for _, planner_key, trial, plan_dir in jobs
@@ -505,6 +523,8 @@ def run_condition_trial(
     plan_timeout: float,
     impl_timeout: float,
     judge_timeout: float,
+    save_pi_sessions: bool = False,
+    run_label: str = "run",
     ui=None,
 ) -> tuple[TrialRecord, dict]:
     benchmark = make_benchmark_fingerprint(
@@ -544,9 +564,18 @@ def run_condition_trial(
         impl_cost = ic.usd
         impl_status = "complete"
     else:
-        impl = run_impl_phase(implementer, prompts["implement"], plan_text, build_dir,
-                              timeout=impl_timeout, pin_temperature=True,
-                              thinking_level=implementer.thinking_level, ui=ui)
+        impl = run_impl_phase(
+            implementer,
+            prompts["implement"],
+            plan_text,
+            build_dir,
+            timeout=impl_timeout,
+            pin_temperature=True,
+            thinking_level=implementer.thinking_level,
+            persist_pi_session=save_pi_sessions,
+            session_name=_pi_session_name(run_label, "implementer", cond.implementer, trial=trial, condition_id=cond.id),
+            ui=ui,
+        )
         impl_cost = impl.cost.usd
         impl_status = impl.status
 
@@ -609,6 +638,8 @@ def run_condition_trials(
     impl_timeout: float,
     judge_timeout: float,
     parallel_workers: int = 1,
+    save_pi_sessions: bool = False,
+    run_label: str = "run",
     ui=None,
 ) -> tuple[list[TrialRecord], list[dict]]:
     jobs: list[tuple[int, Condition, int, Path]] = []
@@ -635,6 +666,8 @@ def run_condition_trials(
                 plan_timeout=plan_timeout,
                 impl_timeout=impl_timeout,
                 judge_timeout=judge_timeout,
+                save_pi_sessions=save_pi_sessions,
+                run_label=run_label,
                 ui=phase_ui,
             )
             if ui:
@@ -757,6 +790,8 @@ def _main() -> None:
     rp.add_argument("--judge-timeout", type=float, default=300.0)
     rp.add_argument("--parallel", type=str, default="auto",
                     help="planner/build concurrency: 'auto' (default), 'all', or a positive integer; use 1 for serial")
+    rp.add_argument("--pi-sessions", action=argparse.BooleanOptionalAction, default=True,
+                    help="save real Pi RPC sessions in Pi's default session store with descriptive names")
     rp.add_argument("--live", action=argparse.BooleanOptionalAction, default=None,
                     help="enable/disable the Rich live dashboard (default: auto when attached to a TTY)")
     rp.add_argument("--debug", action="store_true", help="show full Python tracebacks on errors")
@@ -803,6 +838,7 @@ def _main() -> None:
     impl_jobs = len(conditions) * args.trials
     judge_jobs = impl_jobs * len(cfg.judges)
     ui.log(f"phase plan: {plan_jobs} shared planner run(s) → build: {impl_jobs} implementation run(s) → judge: {judge_jobs} judge run(s)")
+    ui.log(f"Pi sessions: {'saved with descriptive names' if args.pi_sessions and not args.dry_run else 'not saved'}")
     ui.log("conditions:")
     for c in conditions:
         planner_thinking = cfg.model(c.planner).thinking_level or "default/off"
@@ -826,6 +862,8 @@ def _main() -> None:
         dry_run=args.dry_run,
         plan_timeout=args.plan_timeout,
         parallel_workers=parallel_workers,
+        save_pi_sessions=args.pi_sessions and not args.dry_run,
+        run_label=run_dir.name,
         ui=ui,
     )
 
@@ -841,6 +879,8 @@ def _main() -> None:
         impl_timeout=args.impl_timeout,
         judge_timeout=args.judge_timeout,
         parallel_workers=parallel_workers,
+        save_pi_sessions=args.pi_sessions and not args.dry_run,
+        run_label=run_dir.name,
         ui=ui,
     )
 
@@ -874,6 +914,8 @@ def _main() -> None:
             cfg, prompts["judge"], Path(meta["build_dir"]),
             meta["smoke_summary"], meta["screenshots"], timeout=args.judge_timeout,
             transcripts_dir=trial_dir / "judge-transcripts",
+            persist_pi_session=args.pi_sessions,
+            session_name_prefix=_pi_session_name(run_dir.name, "judge", "panel", trial=rec.trial, condition_id=rec.condition_id),
             ui=ui,
         )
         rec.per_judge = {
@@ -918,6 +960,8 @@ def _main() -> None:
     print(f"results json: {abs_results_json}")
     print(f"report: {abs_report_path}")
     print(f"open report: {abs_report_path.as_uri()}")
+    if args.pi_sessions and not args.dry_run:
+        print("Pi sessions: saved in Pi's default session store; paths are recorded in transcripts/report.html")
     # leaderboard preview
     ranked = sorted(results["conditions"].items(), key=lambda kv: kv[1]["quality"], reverse=True)
     print("\nleaderboard (quality | cost$ | efficiency):")

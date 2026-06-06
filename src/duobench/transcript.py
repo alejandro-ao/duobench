@@ -34,6 +34,7 @@ class Transcript:
     turns: list[TranscriptTurn] = field(default_factory=list)
     status: str = "unknown"
     notes: list[str] = field(default_factory=list)
+    pi_session: dict[str, Any] | None = None
 
     def add_turn(
         self,

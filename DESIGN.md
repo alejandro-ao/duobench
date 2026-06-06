@@ -159,6 +159,12 @@ stdin/stdout. Switching models is a `set_model` command (provider + model_id com
 Pi natively supports `anthropic`, `openai`, and `kimi`/Moonshot providers. This means
 there is **no special-casing per model** — the harness treats all three identically.
 
+For real runs, duobench leaves Pi session persistence enabled by default and passes
+`--name` to each RPC subprocess. Planner, implementer, and judge sessions are therefore
+available in Pi's normal session browser/store (typically `~/.pi/agent/sessions/`) with
+names containing `duobench`, the task (`webos`), run timestamp, role, condition/model, and
+trial. `--no-pi-sessions` disables this if you only want duobench's own transcripts.
+
 - **Kimi:** already configured in the user's Pi setup (Kimi API). No extra work.
 - **GPT-5.5:** `openai` provider via OpenAI API key in Pi.
 - **Opus 4.8:** `anthropic` provider — user adds the Claude API key to Pi.

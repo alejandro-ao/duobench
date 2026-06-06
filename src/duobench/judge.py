@@ -122,6 +122,8 @@ def judge_build(
     *,
     timeout: float = 300.0,
     transcript_path: Path | None = None,
+    persist_pi_session: bool = False,
+    session_name: str | None = None,
     ui=None,
 ) -> JudgeScore:
     prompt = (
@@ -131,6 +133,7 @@ def judge_build(
     )
     images = _encode_images(screenshots)
     transcript = new_transcript("judge", judge_model)
+    session_state: dict = {}
     if ui:
         ui.start_phase("Judging", judge_key)
     raw_events_path = transcript_path.with_suffix(".events.jsonl") if transcript_path else None
@@ -139,6 +142,8 @@ def judge_build(
         enable_tools=False,
         event_callback=getattr(ui, "on_rpc_event", None),
         raw_events_path=raw_events_path,
+        persist_session=persist_pi_session,
+        session_name=session_name,
     ) as s:
         s.set_model(judge_model.provider, judge_model.model_id)
         if judge_model.thinking_level is not None:
@@ -161,11 +166,20 @@ def judge_build(
         except PiRpcError as e:
             transcript.status = "error"
             transcript.notes = [str(e)]
+            try:
+                session_state = s.get_state()
+            except Exception:
+                session_state = {}
+            transcript.pi_session = _session_metadata(session_state, session_name)
             if transcript_path:
                 transcript.write(transcript_path)
             if ui:
                 ui.end_phase("error")
             return JudgeScore(judge_key, 0, 0, 0, error=str(e))
+        try:
+            session_state = s.get_state()
+        except Exception:
+            session_state = {}
     cost = compute_cost(result.usage, judge_model)
     transcript.add_turn(kind="prompt", prompt=prompt, result=result, cost=cost, started_at=started, ended_at=ended)
     if ui:
@@ -174,6 +188,7 @@ def judge_build(
     transcript.status = "complete" if score.error is None else "error"
     if score.error:
         transcript.notes = [score.error]
+    transcript.pi_session = _session_metadata(session_state, session_name)
     if transcript_path:
         transcript.write(transcript_path)
     if ui:
@@ -190,6 +205,8 @@ def judge_panel(
     *,
     timeout: float = 300.0,
     transcripts_dir: Path | None = None,
+    persist_pi_session: bool = False,
+    session_name_prefix: str | None = None,
     ui=None,
 ) -> list[JudgeScore]:
     """Run every configured judge over one build."""
@@ -198,15 +215,29 @@ def judge_panel(
     for judge_key in cfg.judges:
         model = cfg.model(judge_key)
         transcript_path = transcripts_dir / f"{judge_key}.json" if transcripts_dir else None
+        session_name = f"{session_name_prefix} judge={judge_key}" if session_name_prefix else None
         scores.append(
             judge_build(
                 model, judge_key, judge_prompt_template,
                 source, smoke_summary, screenshots, timeout=timeout,
                 transcript_path=transcript_path,
+                persist_pi_session=persist_pi_session,
+                session_name=session_name,
                 ui=ui,
             )
         )
     return scores
+
+
+def _session_metadata(state: dict, requested_name: str | None) -> dict | None:
+    if not state and not requested_name:
+        return None
+    return {
+        "requested_name": requested_name,
+        "name": state.get("sessionName") or requested_name,
+        "session_file": state.get("sessionFile"),
+        "session_id": state.get("sessionId"),
+    }
 
 
 def average_dimensions(scores: list[JudgeScore]) -> dict[str, float]:
