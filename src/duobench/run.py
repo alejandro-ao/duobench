@@ -10,6 +10,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import sys
@@ -22,15 +23,17 @@ from pathlib import Path
 
 from duobench.aggregate import TrialRecord, aggregate
 from duobench.charts import generate_charts
-from duobench.config import Condition, Config, ConfigError, load_config
-from duobench.judge import DIMENSIONS, average_dimensions, judge_panel
+from duobench.config import Condition, Config, ConfigError, Model, load_config
+from duobench.cost import PhaseCost, compute_cost
+from duobench.judge import DIMENSIONS, JudgeScore, average_dimensions, judge_panel
 from duobench.plan_phase import run_plan_phase
 from duobench.impl_phase import run_impl_phase
 from duobench.verify import verify_build
-from duobench.pi_rpc import PiRpcError
+from duobench.pi_rpc import PiRpcError, TurnResult, Usage
 from duobench.report import generate_report
-from duobench.ui import make_ui
 from duobench.fingerprint import make_benchmark_fingerprint
+from duobench.transcript import new_transcript
+from duobench.ui import make_ui
 
 AUTO_PARALLEL_WORKERS = 2
 ALL_PARALLEL_WORKERS = 10_000
@@ -78,21 +81,154 @@ def _load_prompt(name: str) -> str:
     return (resources.files("duobench.defaults.prompts") / name).read_text()
 
 
-def _stub_plan() -> str:
-    return "# Stub plan\nA minimal WebOS: WindowManager, AppRegistry, FileSystem, Taskbar.\n"
+def _stable_int(key: str, low: int, high: int) -> int:
+    """Deterministic pseudo-random integer, inclusive."""
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return low + (int(digest[:12], 16) % (high - low + 1))
 
 
-def _stub_build(build_dir: Path) -> None:
+def _model_quality_hint(model_key: str) -> float:
+    """Small dry-run-only quality prior so demo results are varied and plausible."""
+    low = model_key.lower()
+    if any(s in low for s in ("opus", "claude")):
+        base = 8.8
+    elif any(s in low for s in ("gpt", "openai")):
+        base = 8.4
+    elif "kimi" in low:
+        base = 7.6
+    elif any(s in low for s in ("glm", "deepseek", "qwen")):
+        base = 7.3
+    elif any(s in low for s in ("mini", "minimax", "mistral")):
+        base = 7.0
+    else:
+        base = 6.8
+    return base + (_stable_int(model_key, -20, 20) / 100)
+
+
+def _clamp_score(value: float) -> int:
+    return max(1, min(10, int(round(value))))
+
+
+def _fake_usage(key: str, phase: str, trial: int) -> Usage:
+    if phase == "plan":
+        return Usage(
+            input=_stable_int(f"{key}:{phase}:{trial}:in", 18_000, 42_000),
+            output=_stable_int(f"{key}:{phase}:{trial}:out", 3_000, 9_000),
+            cache_read=_stable_int(f"{key}:{phase}:{trial}:cache", 0, 8_000),
+        )
+    if phase == "judge":
+        return Usage(
+            input=_stable_int(f"{key}:{phase}:{trial}:in", 25_000, 65_000),
+            output=_stable_int(f"{key}:{phase}:{trial}:out", 500, 1_500),
+            cache_read=_stable_int(f"{key}:{phase}:{trial}:cache", 0, 5_000),
+        )
+    return Usage(
+        input=_stable_int(f"{key}:{phase}:{trial}:in", 70_000, 180_000),
+        output=_stable_int(f"{key}:{phase}:{trial}:out", 18_000, 55_000),
+        cache_read=_stable_int(f"{key}:{phase}:{trial}:cache", 0, 20_000),
+    )
+
+
+def _fake_turn_result(text: str, usage: Usage, *, tool_calls: int = 0) -> TurnResult:
+    content: list[dict] = [{"type": "text", "text": text}]
+    for idx in range(tool_calls):
+        content.append({"type": "tool_use", "name": "write" if idx == 0 else "edit", "input": {}})
+    return TurnResult(
+        text=text,
+        usage=usage,
+        raw_messages=[
+            {"role": "user", "content": [{"type": "text", "text": "[dry-run synthetic prompt]"}]},
+            {
+                "role": "assistant",
+                "content": content,
+                "usage": {
+                    "input": usage.input,
+                    "output": usage.output,
+                    "cacheRead": usage.cache_read,
+                    "cacheWrite": usage.cache_write,
+                    "cost": usage.reported_cost,
+                },
+            },
+        ],
+    )
+
+
+def _write_fake_transcript(
+    *,
+    phase: str,
+    model: Model,
+    prompt: str,
+    assistant_text: str,
+    usage: Usage,
+    cost: PhaseCost,
+    path: Path,
+    status: str = "complete",
+    duration_s: float = 12.0,
+    tool_calls: int = 0,
+) -> None:
+    transcript = new_transcript(phase, model)
+    transcript.add_turn(
+        kind="dry_run",
+        prompt=prompt,
+        result=_fake_turn_result(assistant_text, usage, tool_calls=tool_calls),
+        cost=cost,
+        started_at=0.0,
+        ended_at=duration_s,
+    )
+    transcript.status = status
+    transcript.notes = ["synthetic dry-run transcript; no model/API call was made"]
+    transcript.write(path)
+
+
+def _stub_plan(planner_key: str = "stub-planner") -> str:
+    return (
+        f"# Dry-run WebOS plan from {planner_key}\n\n"
+        "- Build a desktop shell with a taskbar, launcher, notifications, and windows.\n"
+        "- Implement apps for Files, Notes, Browser, Terminal, Music, Settings, and Games.\n"
+        "- Keep state in localStorage and split behavior into WindowManager, AppRegistry, "
+        "FileSystem, and ThemeManager modules.\n"
+    )
+
+
+def _stub_build(build_dir: Path, *, title: str = "Dry-run WebOS", accent: str = "#7c9cff") -> None:
     build_dir.mkdir(parents=True, exist_ok=True)
     (build_dir / "index.html").write_text(
-        "<!doctype html><html><body>"
-        "<div id='desktop'><div class='desktop-icon' data-app='a'>A</div>"
-        "<div class='desktop-icon' data-app='b'>B</div>"
-        "<div class='desktop-icon' data-app='c'>C</div></div>"
-        "<div class='taskbar'></div>"
-        "<script>document.querySelectorAll('.desktop-icon').forEach(i=>"
-        "i.onclick=()=>{const w=document.createElement('div');w.className='window';"
-        "document.body.appendChild(w);});</script></body></html>"
+        f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{title}</title>
+  <style>
+    body{{margin:0;height:100vh;background:linear-gradient(135deg,#111827,#1f2a44);font-family:system-ui;color:white;overflow:hidden}}
+    #desktop{{display:grid;grid-template-columns:repeat(4,92px);gap:18px;padding:28px}}
+    .desktop-icon{{display:grid;place-items:center;height:82px;border-radius:18px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.18);cursor:pointer}}
+    .desktop-icon:before{{content:attr(data-app);display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:{accent};margin-bottom:6px}}
+    .taskbar{{position:fixed;left:18px;right:18px;bottom:14px;height:54px;border-radius:18px;background:rgba(5,8,16,.72);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.18)}}
+    .window{{position:absolute;left:160px;top:110px;width:420px;height:280px;border-radius:18px;background:#f8fafc;color:#111827;box-shadow:0 24px 80px rgba(0,0,0,.38);overflow:hidden}}
+    .window header{{padding:12px 16px;background:{accent};color:white;font-weight:700}}
+    .window main{{padding:18px}}
+  </style>
+</head>
+<body>
+  <div id="desktop">
+    <div class="desktop-icon" data-app="Files">Files</div>
+    <div class="desktop-icon" data-app="Notes">Notes</div>
+    <div class="desktop-icon" data-app="Browser">Browser</div>
+    <div class="desktop-icon" data-app="Terminal">Terminal</div>
+    <div class="desktop-icon" data-app="Music">Music</div>
+    <div class="desktop-icon" data-app="Settings">Settings</div>
+  </div>
+  <div class="taskbar"></div>
+  <script>
+    document.querySelectorAll('.desktop-icon').forEach(icon => icon.onclick = () => {{
+      const w = document.createElement('section');
+      w.className = 'window';
+      w.innerHTML = `<header>${{icon.dataset.app}}</header><main><h2>${{icon.dataset.app}}</h2><p>Synthetic dry-run app shell.</p></main>`;
+      document.body.appendChild(w);
+    }});
+  </script>
+</body>
+</html>"""
     )
 
 
@@ -247,9 +383,21 @@ def run_shared_plan(
     plan_dir.mkdir(parents=True, exist_ok=True)
     (ui.log if ui else print)(f"  [shared plan trial {trial}] planner={planner_key}")
     if dry_run:
-        plan_text = _stub_plan()
+        plan_text = _stub_plan(planner_key)
         (plan_dir / "plan.md").write_text(plan_text)
-        plan_cost = 0.0
+        usage = _fake_usage(planner_key, "plan", trial)
+        pc = compute_cost(usage, planner)
+        _write_fake_transcript(
+            phase="planner",
+            model=planner,
+            prompt=prompts["architect"],
+            assistant_text=plan_text,
+            usage=usage,
+            cost=pc,
+            path=plan_dir / "planner-transcript.json",
+            duration_s=float(_stable_int(f"{planner_key}:plan:{trial}:duration", 18, 75)),
+        )
+        plan_cost = pc.usd
     else:
         plan_text, pc = run_plan_phase(
             planner,
@@ -377,8 +525,22 @@ def run_condition_trial(
 
     # --- implement ---
     if dry_run:
-        _stub_build(build_dir)
-        impl_cost = 0.0
+        accent = f"#{_stable_int(cond.id, 0, 0xFFFFFF):06x}"
+        _stub_build(build_dir, title=f"{cond.id} dry-run WebOS", accent=accent)
+        usage = _fake_usage(cond.id, "implement", trial)
+        ic = compute_cost(usage, implementer)
+        _write_fake_transcript(
+            phase="implementer",
+            model=implementer,
+            prompt=prompts["implement"].replace("{plan}", plan_text),
+            assistant_text=f"Built synthetic WebOS for {cond.id}. BUILD COMPLETE",
+            usage=usage,
+            cost=ic,
+            path=trial_dir / "implementer-transcript.json",
+            duration_s=float(_stable_int(f"{cond.id}:impl:{trial}:duration", 90, 900)),
+            tool_calls=_stable_int(f"{cond.id}:impl:{trial}:tools", 4, 24),
+        )
+        impl_cost = ic.usd
         impl_status = "complete"
     else:
         impl = run_impl_phase(implementer, prompts["implement"], plan_text, build_dir,
@@ -503,6 +665,64 @@ def run_condition_trials(
     return records, metas
 
 
+def _dry_run_judge_scores(cfg: Config, rec: TrialRecord) -> list[JudgeScore]:
+    planner_q = _model_quality_hint(rec.planner)
+    implementer_q = _model_quality_hint(rec.implementer)
+    base = {
+        "architecture": 0.72 * planner_q + 0.28 * implementer_q,
+        "correctness": 0.22 * planner_q + 0.78 * implementer_q,
+        "visual_ux": 0.15 * planner_q + 0.85 * implementer_q,
+    }
+    scores: list[JudgeScore] = []
+    for judge_key in cfg.judges:
+        jitter = _stable_int(f"{judge_key}:{rec.condition_id}:{rec.trial}:jitter", -6, 6) / 10
+        # Tiny visible self-bias in the demo so the self-bias matrix is meaningful.
+        bias = 0.25 if judge_key in {rec.planner, rec.implementer} else 0.0
+        scores.append(
+            JudgeScore(
+                judge=judge_key,
+                architecture=_clamp_score(base["architecture"] + jitter + bias),
+                correctness=_clamp_score(base["correctness"] + jitter + bias),
+                visual_ux=_clamp_score(base["visual_ux"] + jitter + bias),
+                notes="synthetic dry-run score; no judge model was called",
+            )
+        )
+    return scores
+
+
+def _write_dry_run_judge_transcripts(
+    cfg: Config,
+    scores: list[JudgeScore],
+    trial_dir: Path,
+    judge_prompt: str,
+    trial: int,
+) -> None:
+    judge_dir = trial_dir / "judge-transcripts"
+    judge_dir.mkdir(parents=True, exist_ok=True)
+    for score in scores:
+        model = cfg.model(score.judge)
+        usage = _fake_usage(f"{score.judge}:{trial_dir.parent.name}", "judge", trial)
+        cost = compute_cost(usage, model)
+        assistant_text = json.dumps(
+            {
+                "architecture": score.architecture,
+                "correctness": score.correctness,
+                "visual_ux": score.visual_ux,
+                "notes": score.notes,
+            }
+        )
+        _write_fake_transcript(
+            phase="judge",
+            model=model,
+            prompt=judge_prompt,
+            assistant_text=assistant_text,
+            usage=usage,
+            cost=cost,
+            path=judge_dir / f"{score.judge}.json",
+            duration_s=float(_stable_int(f"{score.judge}:{trial_dir}:judge-duration", 8, 45)),
+        )
+
+
 def _main() -> None:
     ap = argparse.ArgumentParser(
         prog="duobench",
@@ -526,7 +746,7 @@ def _main() -> None:
                     help="comma-separated planner model keys for a rectangular matrix")
     rp.add_argument("--implementers", type=str, default="",
                     help="comma-separated implementer model keys for a rectangular matrix")
-    rp.add_argument("--dry-run", action="store_true", help="stub all model calls")
+    rp.add_argument("--dry-run", action="store_true", help="stub all model calls with synthetic plans, builds, costs, and judge scores")
     rp.add_argument("--out", type=str, default="runs")
     rp.add_argument("--models-config", type=str, default="config/models.yaml")
     rp.add_argument("--conditions-config", type=str, default="config/conditions.yaml")
@@ -622,11 +842,13 @@ def _main() -> None:
     for rec, meta in zip(records, metas):
         ui.start_trial(rec.condition_id, rec.trial, "judging")
         if args.dry_run:
-            # canned scores so the wiring runs without real judges
-            for jk in cfg.judges:
-                rec.per_judge[jk] = {d: 6 for d in DIMENSIONS}
-            rec.dimensions = {d: 6.0 for d in DIMENSIONS}
+            scores = _dry_run_judge_scores(cfg, rec)
+            rec.per_judge = {
+                s.judge: {d: getattr(s, d) for d in DIMENSIONS} for s in scores if s.error is None
+            }
+            rec.dimensions = average_dimensions(scores)
             trial_dir = Path(meta["build_dir"]).parent
+            _write_dry_run_judge_transcripts(cfg, scores, trial_dir, prompts["judge"], rec.trial)
             existing_trial = json.loads((trial_dir / "trial.json").read_text())
             (trial_dir / "trial.json").write_text(json.dumps(
                 {
@@ -634,7 +856,7 @@ def _main() -> None:
                     "artifacts": existing_trial.get("artifacts"),
                     "record": rec.__dict__,
                     "meta": meta,
-                    "judge_scores": [],
+                    "judge_scores": [s.to_dict() for s in scores],
                 },
                 indent=2, default=str,
             ))

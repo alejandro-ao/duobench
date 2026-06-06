@@ -71,8 +71,8 @@ For a copy/paste prompt you can give to a cloud coding agent, see
 ## Run
 
 ```bash
-# validate the full pipeline with stubbed model calls (no API spend)
-uv run duobench run --dry-run
+# preview the full matrix presentation with synthetic plans/builds/scores (no API spend)
+uv run duobench run --dry-run --models kimi-k2.6,gpt-5.5 --trials 1
 
 # simplest real benchmark: every model plans once, then every planner×implementer pair builds
 uv run duobench run --models kimi-k2.6,gpt-5.5,claude-opus-4.8 --trials 1
@@ -97,7 +97,7 @@ uv run duobench run --trials 3
 | `--planners a,b` | off | Planner keys for a rectangular matrix; use with `--implementers` |
 | `--implementers a,b` | off | Implementer keys for a rectangular matrix; use with `--planners` |
 | `--parallel auto\|all\|N` | `auto` | Planner/build concurrency (`auto` caps at 2 workers; `all` runs every job in each phase; use `1` for serial) |
-| `--dry-run` | off | Stub all model calls + canned judge scores |
+| `--dry-run` | off | Stub all model calls with synthetic plans, builds, costs, transcripts, and varied judge scores |
 | `--out DIR` | `runs` | Output root |
 | `--models-config` | `config/models.yaml` | Model registry |
 | `--conditions-config` | `config/conditions.yaml` | Combinations |
@@ -173,6 +173,20 @@ When attached to an interactive terminal, `duobench run` shows a Rich live dashb
 current phase, spinner, elapsed time, event/message/tool-call counts, the latest tool call,
 tokens, cache tokens, configured cost, and Pi-reported cost. Use `--no-live` for plain logs or `--live` to force
 it on.
+
+## Previewing result presentation
+
+Use dry-run matrix mode to inspect the exact report/charts/leaderboard shape without model
+spend:
+
+```bash
+uv run duobench run --dry-run --models kimi-k2.6,gpt-5.5,claude-opus-4.8 --trials 1 --no-live
+open runs/<timestamp>/report.html
+```
+
+Dry-run now writes synthetic shared plans, generated WebOS files, transcripts, non-zero
+configured costs from `models.yaml` pricing, varied judge scores, `results.json`, chart CSVs,
+PNGs, and the same `report.html` a real run writes.
 
 ## Outputs
 

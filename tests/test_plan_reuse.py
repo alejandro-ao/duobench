@@ -54,7 +54,9 @@ def test_shared_plans_are_created_once_per_planner_and_trial(tmp_path):
 
     assert sorted(plans) == [("gpt", 0), ("kimi", 0)]
     assert plans[("kimi", 0)].source_dir == tmp_path / "shared-plans" / "kimi" / "trial-0"
+    assert plans[("kimi", 0)].cost_usd > 0
     assert (plans[("kimi", 0)].source_dir / "plan.md").exists()
+    assert (plans[("kimi", 0)].source_dir / "planner-transcript.json").exists()
 
 
 def test_condition_trials_reference_same_shared_plan(tmp_path, monkeypatch):
@@ -94,5 +96,7 @@ def test_condition_trials_reference_same_shared_plan(tmp_path, monkeypatch):
 
     assert first["artifacts"]["plan"]["shared"] is True
     assert first["artifacts"]["plan"]["source_dir"] == second["artifacts"]["plan"]["source_dir"]
+    assert first["record"]["cost_usd"] > first["artifacts"]["plan"]["cost_usd"]
     assert (tmp_path / "conditions" / "kimi-solo" / "trial-0" / "plan.md").read_text() == shared_plan.plan_text
     assert (tmp_path / "conditions" / "kimi-x-gpt" / "trial-0" / "plan.md").read_text() == shared_plan.plan_text
+    assert (tmp_path / "conditions" / "kimi-solo" / "trial-0" / "implementer-transcript.json").exists()
