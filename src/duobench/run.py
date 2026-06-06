@@ -14,6 +14,7 @@ import json
 import shutil
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
@@ -29,6 +30,16 @@ from duobench.pi_rpc import PiRpcError
 from duobench.report import generate_report
 from duobench.ui import make_ui
 from duobench.fingerprint import make_benchmark_fingerprint
+
+
+@dataclass(frozen=True)
+class SharedPlan:
+    planner: str
+    trial: int
+    plan_text: str
+    cost_usd: float
+    source_dir: Path
+
 
 def _load_prompt(name: str) -> str:
     """Load prompt from ./prompts when present, otherwise from packaged defaults."""
@@ -66,12 +77,112 @@ def select_conditions(cfg: Config, only: list[str] | None) -> list[Condition]:
     return [by_id[o] for o in only]
 
 
+def _safe_path_part(value: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in value)
+
+
+def _unique_planners(conditions: list[Condition]) -> list[str]:
+    planners: list[str] = []
+    seen: set[str] = set()
+    for cond in conditions:
+        if cond.planner not in seen:
+            seen.add(cond.planner)
+            planners.append(cond.planner)
+    return planners
+
+
+def run_shared_plan(
+    cfg: Config,
+    planner_key: str,
+    trial: int,
+    plan_dir: Path,
+    prompts: dict[str, str],
+    *,
+    dry_run: bool,
+    plan_timeout: float,
+    ui=None,
+) -> SharedPlan:
+    planner = cfg.model(planner_key)
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    (ui.log if ui else print)(f"  [shared plan trial {trial}] planner={planner_key}")
+    if dry_run:
+        plan_text = _stub_plan()
+        (plan_dir / "plan.md").write_text(plan_text)
+        plan_cost = 0.0
+    else:
+        plan_text, pc = run_plan_phase(
+            planner,
+            prompts["architect"],
+            plan_dir,
+            timeout=plan_timeout,
+            pin_temperature=True,
+            ui=ui,
+        )
+        plan_cost = pc.usd
+    (plan_dir / "shared-plan.json").write_text(json.dumps(
+        {
+            "planner": planner_key,
+            "trial": trial,
+            "cost_usd": round(plan_cost, 6),
+            "plan_dir": str(plan_dir),
+        },
+        indent=2,
+    ))
+    return SharedPlan(
+        planner=planner_key,
+        trial=trial,
+        plan_text=plan_text,
+        cost_usd=plan_cost,
+        source_dir=plan_dir,
+    )
+
+
+def prepare_shared_plans(
+    cfg: Config,
+    conditions: list[Condition],
+    trials: int,
+    run_dir: Path,
+    prompts: dict[str, str],
+    *,
+    dry_run: bool,
+    plan_timeout: float,
+    ui=None,
+) -> dict[tuple[str, int], SharedPlan]:
+    plans: dict[tuple[str, int], SharedPlan] = {}
+    plan_root = run_dir / "shared-plans"
+    for trial in range(trials):
+        for planner_key in _unique_planners(conditions):
+            plan_dir = plan_root / _safe_path_part(planner_key) / f"trial-{trial}"
+            plans[(planner_key, trial)] = run_shared_plan(
+                cfg,
+                planner_key,
+                trial,
+                plan_dir,
+                prompts,
+                dry_run=dry_run,
+                plan_timeout=plan_timeout,
+                ui=ui,
+            )
+    return plans
+
+
+def copy_plan_artifacts(plan: SharedPlan, trial_dir: Path) -> None:
+    trial_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("plan.md", "planner-transcript.json", "planner-events.jsonl"):
+        src = plan.source_dir / name
+        if src.exists():
+            shutil.copy(src, trial_dir / name)
+    if not (trial_dir / "plan.md").exists():
+        (trial_dir / "plan.md").write_text(plan.plan_text)
+
+
 def run_condition_trial(
     cfg: Config,
     cond: Condition,
     trial: int,
     trial_dir: Path,
     prompts: dict[str, str],
+    shared_plan: SharedPlan,
     *,
     dry_run: bool,
     plan_timeout: float,
@@ -86,21 +197,15 @@ def run_condition_trial(
         impl_timeout=impl_timeout,
         judge_timeout=judge_timeout,
     )
-    planner = cfg.model(cond.planner)
     implementer = cfg.model(cond.implementer)
     build_dir = trial_dir / "build"
     shots_dir = trial_dir / "screenshots"
     (ui.log if ui else print)(f"  [{cond.id} trial {trial}] plan={cond.planner} impl={cond.implementer}")
 
-    # --- plan ---
-    if dry_run:
-        plan_text = _stub_plan()
-        (trial_dir / "plan.md").write_text(plan_text)
-        plan_cost = 0.0
-    else:
-        plan_text, pc = run_plan_phase(planner, prompts["architect"], trial_dir,
-                                       timeout=plan_timeout, pin_temperature=True, ui=ui)
-        plan_cost = pc.usd
+    # --- plan handoff ---
+    copy_plan_artifacts(shared_plan, trial_dir)
+    plan_text = shared_plan.plan_text
+    plan_cost = shared_plan.cost_usd
 
     # --- implement ---
     if dry_run:
@@ -137,8 +242,22 @@ def run_condition_trial(
         "smoke_summary": vres.summary_for_judge(),
         "screenshots": vres.screenshots,
     }
+    artifacts = {
+        "plan": {
+            "shared": True,
+            "planner": shared_plan.planner,
+            "trial": shared_plan.trial,
+            "source_dir": str(shared_plan.source_dir),
+            "cost_usd": round(shared_plan.cost_usd, 6),
+        }
+    }
     (trial_dir / "trial.json").write_text(json.dumps(
-        {"benchmark": benchmark.to_dict(), "record": record.__dict__, "meta": record_meta},
+        {
+            "benchmark": benchmark.to_dict(),
+            "artifacts": artifacts,
+            "record": record.__dict__,
+            "meta": record_meta,
+        },
         indent=2,
         default=str,
     ))
@@ -208,7 +327,19 @@ def _main() -> None:
         ui.log("\nTip: if this is your first run, `duobench run --dry-run` validates the pipeline without API spend.")
     ui.log("")
 
-    # --- phase 1: plan + implement + verify per condition×trial ---
+    # --- phase 1: shared planning, then implement + verify per condition×trial ---
+    ui.log("planning shared planner samples...")
+    shared_plans = prepare_shared_plans(
+        cfg,
+        conditions,
+        args.trials,
+        run_dir,
+        prompts,
+        dry_run=args.dry_run,
+        plan_timeout=args.plan_timeout,
+        ui=ui,
+    )
+
     records: list[TrialRecord] = []
     metas: list[dict] = []
     for cond in conditions:
@@ -218,6 +349,7 @@ def _main() -> None:
             ui.start_trial(cond.id, trial, "running")
             rec, meta = run_condition_trial(
                 cfg, cond, trial, trial_dir, prompts,
+                shared_plan=shared_plans[(cond.planner, trial)],
                 dry_run=args.dry_run,
                 plan_timeout=args.plan_timeout, impl_timeout=args.impl_timeout,
                 judge_timeout=args.judge_timeout,
@@ -239,7 +371,13 @@ def _main() -> None:
             trial_dir = Path(meta["build_dir"]).parent
             existing_trial = json.loads((trial_dir / "trial.json").read_text())
             (trial_dir / "trial.json").write_text(json.dumps(
-                {"benchmark": existing_trial.get("benchmark"), "record": rec.__dict__, "meta": meta, "judge_scores": []},
+                {
+                    "benchmark": existing_trial.get("benchmark"),
+                    "artifacts": existing_trial.get("artifacts"),
+                    "record": rec.__dict__,
+                    "meta": meta,
+                    "judge_scores": [],
+                },
                 indent=2, default=str,
             ))
             ui.finish_trial(rec.condition_id, rec.trial, "done")
@@ -260,6 +398,7 @@ def _main() -> None:
         (trial_dir / "trial.json").write_text(json.dumps(
             {
                 "benchmark": existing_trial.get("benchmark"),
+                "artifacts": existing_trial.get("artifacts"),
                 "record": rec.__dict__,
                 "meta": meta,
                 "judge_scores": [s.to_dict() for s in scores],

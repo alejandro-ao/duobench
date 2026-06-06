@@ -172,12 +172,20 @@ files in the current working directory. If they are absent, it uses packaged def
 you can run it from an empty experiment directory and keep outputs/config separate from the
 source checkout.
 
+Within a run, planner outputs are shared by `(planner, trial)`: if `kimi-solo` and
+`kimi-x-gpt` both use the same Kimi planner for trial 0, duobench calls Kimi once, then
+copies that plan into each condition's trial directory. Condition-level cost still includes
+the planner cost for fair comparisons.
+
 Each run writes `runs/<timestamp>/`:
 
 ```
 report.html       visual run report: builds, screenshots, agent threads, timing/tokens/cost
+shared-plans/<planner>/trial-<n>/
+  plan.md                    shared planner output used by matching conditions
+  shared-plan.json           planner/cost/source metadata
 conditions/<id>/trial-<n>/
-  plan.md                    planner output (the handoff artifact)
+  plan.md                    planner output (copied handoff artifact)
   planner-transcript.json    raw planner thread + timing/token/cost stats
   planner-events.jsonl       raw Pi RPC events for debugging/live UI adaptation
   implementer-transcript.json raw implementer turns + tool/message stats
