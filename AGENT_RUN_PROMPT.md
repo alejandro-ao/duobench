@@ -11,6 +11,9 @@ Repository:
 Goal:
   Run exactly one real benchmark condition first: GPT 5.5 as planner and Kimi K2.6 as implementer (`gpt-x-kimi`), one trial. Do not run the full matrix unless explicitly asked later.
 
+Hard requirement:
+  You MUST run the real benchmark inside tmux (or an equivalent persistent terminal multiplexer if tmux is unavailable). Do not run the real benchmark directly in a short-lived shell, because it can take a long time and may be interrupted. Use plain logs (`--no-live`) and tee output to a log file.
+
 Important context:
   - This project benchmarks planner × implementer LLM pairings through Pi RPC.
   - The planner receives `prompts/architect.md` and produces `plan.md`.
@@ -36,11 +39,17 @@ Validation:
     uv run kcbench run --dry-run --conditions gpt-x-kimi --trials 1 --no-live
 
 Real run:
-  Then run exactly:
-    uv run kcbench run --conditions gpt-x-kimi --trials 1 --no-live --plan-timeout 600 --impl-timeout 1800 --judge-timeout 300
+  Run the real benchmark inside tmux. Use this exact pattern, replacing `<repo>` with the repository path:
 
-If the cloud environment supports tmux or background jobs, run the real benchmark in a persistent session and tee output to a log, for example:
   tmux new-session -d -s kcbench 'cd <repo> && PYTHONUNBUFFERED=1 uv run kcbench run --conditions gpt-x-kimi --trials 1 --no-live --plan-timeout 600 --impl-timeout 1800 --judge-timeout 300 2>&1 | tee /tmp/kcbench.log'
+
+  Monitor it with:
+    tmux attach -t kcbench
+    tail -f /tmp/kcbench.log
+
+  Detach safely from tmux with Ctrl-b, then d. Do NOT press Ctrl-d unless you intend to close the shell/session.
+
+  If tmux is truly unavailable, use an equivalent persistent background/session mechanism and explain what you used.
 
 Do not accidentally run all conditions. Use `--conditions gpt-x-kimi`.
 
