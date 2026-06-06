@@ -12,7 +12,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from kcbench.config import Condition, Config, Model
+from duobench.config import Condition, Config, Model
 
 
 FINGERPRINT_SCHEMA_VERSION = 1

@@ -10,10 +10,10 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from kcbench.config import Model
-from kcbench.cost import PhaseCost, compute_cost
-from kcbench.pi_rpc import PiSession
-from kcbench.transcript import new_transcript
+from duobench.config import Model
+from duobench.cost import PhaseCost, compute_cost
+from duobench.pi_rpc import PiSession
+from duobench.transcript import new_transcript
 
 
 def run_plan_phase(

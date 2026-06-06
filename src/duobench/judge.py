@@ -20,10 +20,10 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from kcbench.config import Config, Model
-from kcbench.cost import compute_cost
-from kcbench.pi_rpc import PiRpcError, PiSession
-from kcbench.transcript import new_transcript
+from duobench.config import Config, Model
+from duobench.cost import compute_cost
+from duobench.pi_rpc import PiRpcError, PiSession
+from duobench.transcript import new_transcript
 
 DIMENSIONS = ("architecture", "correctness", "visual_ux")
 _MAX_SOURCE_CHARS = 120_000           # cap concatenated source to stay within context

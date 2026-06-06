@@ -7,9 +7,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kcbench.config import Model
-from kcbench.cost import PhaseCost
-from kcbench.pi_rpc import TurnResult
+from duobench.config import Model
+from duobench.cost import PhaseCost
+from duobench.pi_rpc import TurnResult
 
 
 @dataclass

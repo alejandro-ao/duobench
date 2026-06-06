@@ -1,5 +1,5 @@
-from kcbench.config import Condition, Config, Model, Pricing
-from kcbench.fingerprint import make_benchmark_fingerprint, sha256_text
+from duobench.config import Condition, Config, Model, Pricing
+from duobench.fingerprint import make_benchmark_fingerprint, sha256_text
 
 
 def _cfg() -> Config:

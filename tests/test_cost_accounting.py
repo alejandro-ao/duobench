@@ -1,8 +1,8 @@
 import pytest
 
-from kcbench.config import Model, Pricing
-from kcbench.cost import compute_cost
-from kcbench.pi_rpc import Usage
+from duobench.config import Model, Pricing
+from duobench.cost import compute_cost
+from duobench.pi_rpc import Usage
 
 
 def test_usage_delta_includes_cached_tokens_and_reported_cost() -> None:

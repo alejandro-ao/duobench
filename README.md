@@ -1,6 +1,6 @@
-# kimi-claude-bench
+# duobench
 
-Model-agnostic benchmark for **planner × implementer** agent pairings, run over Pi RPC.
+Cost-efficiency benchmark for **planner × implementer** LLM duos, run over Pi RPC.
 
 Each condition spawns a fresh *planner* session to design a WebOS, hands the plan text
 (only the plan — not the planner's reasoning) to a fresh *implementer* session that builds
@@ -31,10 +31,10 @@ uv sync
 uv run playwright install chromium
 
 # 2. Validate local wiring without API/model spend
-uv run kcbench run --dry-run --conditions gpt-x-kimi --trials 1 --no-live
+uv run duobench run --dry-run --conditions gpt-x-kimi --trials 1 --no-live
 
 # 3. Run one real GPT-planner × Kimi-implementer trial
-uv run kcbench run \
+uv run duobench run \
   --conditions gpt-x-kimi \
   --trials 1 \
   --no-live \
@@ -56,13 +56,13 @@ For a copy/paste prompt you can give to a cloud coding agent, see
 
 ```bash
 # validate the full pipeline with stubbed model calls (no API spend)
-uv run kcbench run --dry-run
+uv run duobench run --dry-run
 
 # one real condition, one trial
-uv run kcbench run --conditions gpt-solo --trials 1
+uv run duobench run --conditions gpt-solo --trials 1
 
 # the whole config, 3 trials each (for error bars)
-uv run kcbench run --trials 3
+uv run duobench run --trials 3
 ```
 
 ### Flags
@@ -85,24 +85,24 @@ uv run kcbench run --trials 3
 Real runs can take a while. For a remote machine, prefer `tmux` and plain logs:
 
 ```bash
-tmux new-session -d -s kcbench \
+tmux new-session -d -s duobench \
   'cd /path/to/agent-synergy-eval && \
-   PYTHONUNBUFFERED=1 uv run kcbench run \
+   PYTHONUNBUFFERED=1 uv run duobench run \
      --conditions gpt-x-kimi \
      --trials 1 \
      --no-live \
      --plan-timeout 600 \
      --impl-timeout 1800 \
      --judge-timeout 300 \
-     2>&1 | tee /tmp/kcbench.log'
+     2>&1 | tee /tmp/duobench.log'
 ```
 
 Monitor:
 
 ```bash
-tmux attach -t kcbench
+tmux attach -t duobench
 # detach safely with Ctrl-b, then d
-tail -f /tmp/kcbench.log
+tail -f /tmp/duobench.log
 ```
 
 ## Configuration
@@ -140,7 +140,7 @@ key fails fast before any model is called.
 
 ## Live CLI
 
-When attached to an interactive terminal, `kcbench run` shows a Rich live dashboard with
+When attached to an interactive terminal, `duobench run` shows a Rich live dashboard with
 current phase, spinner, elapsed time, event/message/tool-call counts, the latest tool call,
 tokens, cache tokens, configured cost, and Pi-reported cost. Use `--no-live` for plain logs or `--live` to force
 it on.
@@ -169,7 +169,7 @@ results/                     leaderboard, dimension-radar, cost-vs-quality, self
 Regenerate a report for an existing run:
 
 ```bash
-uv run kcbench report runs/<timestamp>
+uv run duobench report runs/<timestamp>
 ```
 
 Committed chart/CSV artifacts are also mirrored to top-level `results/`.

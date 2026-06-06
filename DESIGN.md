@@ -1,4 +1,4 @@
-# kimi-claude-bench — Design
+# duobench — Design
 
 A reproducible, **model-agnostic** benchmark that measures the quality and cost of
 **planner → implementer** agent pairings, to find the best cost/quality trade-off for
@@ -128,7 +128,7 @@ checks, computes averages, draws charts. The only agentic work happens *inside* 
 sessions being measured (planner, implementer, judges).
 
 ```
-you → `uv run kcbench run --trials 3`
+you → `uv run duobench run --trials 3`
         └─ for each condition × trial:
              plan_phase  → spawn Pi RPC (planner model)    → plan.md + cost
              impl_phase  → spawn FRESH Pi RPC (impl model) → build/  + cost
@@ -266,7 +266,7 @@ With `--trials 3`, charts show mean + error bars.
 ## 9. Proposed repo structure
 
 ```
-kimi-claude-bench/
+duobench/
 ├── DESIGN.md                      # this file
 ├── README.md                      # how to run
 ├── pyproject.toml                 # uv-managed
@@ -277,7 +277,7 @@ kimi-claude-bench/
 │   ├── architect.md               # WebOS planning prompt (from video plan.md)
 │   ├── implement.md               # build-from-plan prompt
 │   └── judge.md                   # rubric + strict-JSON scoring instructions
-├── src/kcbench/
+├── src/duobench/
 │   ├── pi_rpc.py                  # JSONL subprocess driver (spawn/set_model/prompt/collect)
 │   ├── plan_phase.py              # planner session → plan.md + cost
 │   ├── impl_phase.py              # fresh session → build/ + cost (multi-turn, timeout)

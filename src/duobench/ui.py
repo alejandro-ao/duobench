@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kcbench.pi_rpc import Usage
+from duobench.pi_rpc import Usage
 
 
 @dataclass
@@ -177,7 +177,7 @@ class RichUI(NullUI):
         header.add_column(ratio=1)
         header.add_column(ratio=1)
         conds = ", ".join(getattr(c, "id", str(c)) for c in self.conditions)
-        header.add_row("[bold cyan]kimi-claude-bench[/bold cyan]", f"[bold]{'DRY RUN' if self.dry_run else 'REAL RUN'}[/bold]")
+        header.add_row("[bold cyan]duobench[/bold cyan]", f"[bold]{'DRY RUN' if self.dry_run else 'REAL RUN'}[/bold]")
         header.add_row("run dir", str(self.run_dir or ""))
         header.add_row("conditions", conds)
         header.add_row("trials", str(self.trials))
@@ -255,7 +255,7 @@ def _usage_from_event(ev: dict) -> Usage | None:
     if not usage_obj:
         return None
     try:
-        from kcbench.pi_rpc import Usage as RpcUsage
+        from duobench.pi_rpc import Usage as RpcUsage
 
         return RpcUsage.from_message_usage(usage_obj)
     except Exception:

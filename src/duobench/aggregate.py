@@ -27,7 +27,7 @@ from __future__ import annotations
 import statistics
 from dataclasses import dataclass, field
 
-from kcbench.judge import DIMENSIONS
+from duobench.judge import DIMENSIONS
 
 
 @dataclass

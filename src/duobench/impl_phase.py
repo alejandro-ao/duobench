@@ -16,10 +16,10 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from kcbench.config import Model
-from kcbench.cost import PhaseCost, compute_cost
-from kcbench.pi_rpc import PiRpcError, PiSession, Usage
-from kcbench.transcript import new_transcript
+from duobench.config import Model
+from duobench.cost import PhaseCost, compute_cost
+from duobench.pi_rpc import PiRpcError, PiSession, Usage
+from duobench.transcript import new_transcript
 
 # Heuristic completion markers the implementer is asked to emit when done.
 _DONE_MARKERS = ("build is complete", "build complete", "fully functional", "done building",

@@ -3,7 +3,7 @@
 Use this prompt when asking a cloud agent/runner to execute this benchmark.
 
 ```text
-You are operating in a cloud machine. Your task is to run the agent-synergy-eval benchmark and return the generated artifacts, especially the HTML report.
+You are operating in a cloud machine. Your task is to run the duobench benchmark and return the generated artifacts, especially the HTML report.
 
 Repository:
   git@github.com:alejandro-ao/agent-synergy-eval.git
@@ -36,16 +36,16 @@ Setup steps:
 
 Validation:
   First run a dry run:
-    uv run kcbench run --dry-run --conditions gpt-x-kimi --trials 1 --no-live
+    uv run duobench run --dry-run --conditions gpt-x-kimi --trials 1 --no-live
 
 Real run:
   Run the real benchmark inside tmux. Use this exact pattern, replacing `<repo>` with the repository path:
 
-  tmux new-session -d -s kcbench 'cd <repo> && PYTHONUNBUFFERED=1 uv run kcbench run --conditions gpt-x-kimi --trials 1 --no-live --plan-timeout 600 --impl-timeout 1800 --judge-timeout 300 2>&1 | tee /tmp/kcbench.log'
+  tmux new-session -d -s duobench 'cd <repo> && PYTHONUNBUFFERED=1 uv run duobench run --conditions gpt-x-kimi --trials 1 --no-live --plan-timeout 600 --impl-timeout 1800 --judge-timeout 300 2>&1 | tee /tmp/duobench.log'
 
   Monitor it with:
-    tmux attach -t kcbench
-    tail -f /tmp/kcbench.log
+    tmux attach -t duobench
+    tail -f /tmp/duobench.log
 
   Detach safely from tmux with Ctrl-b, then d. Do NOT press Ctrl-d unless you intend to close the shell/session.
 

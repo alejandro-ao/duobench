@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from kcbench.config import Model
-from kcbench.pi_rpc import Usage
+from duobench.config import Model
+from duobench.pi_rpc import Usage
 
 
 @dataclass(frozen=True)

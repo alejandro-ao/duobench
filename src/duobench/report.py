@@ -84,7 +84,7 @@ def generate_report(run_dir: Path) -> Path:
     trial_dirs = sorted((run_dir / "conditions").glob("*/trial-*"))
 
     nav = ["<div class='nav'>"]
-    body = ["<div class='layout'><aside class='side'><h1>kcbench report</h1>", f"<p class='muted'>{html.escape(run_dir.name)}</p>"]
+    body = ["<div class='layout'><aside class='side'><h1>duobench report</h1>", f"<p class='muted'>{html.escape(run_dir.name)}</p>"]
     if results.get("conditions"):
         body.append("<h3>Leaderboard</h3>")
         for cid, data in sorted(results["conditions"].items(), key=lambda kv: kv[1].get("quality", 0), reverse=True):
@@ -128,7 +128,7 @@ def generate_report(run_dir: Path) -> Path:
                 body.append(_transcript_block(f"Judge thread: {jp.stem}", jp))
     body.append("</main></div>")
 
-    html_doc = "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>kcbench report</title><style>" + CSS + "</style></head><body>" + "".join(body) + "</body></html>"
+    html_doc = "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>duobench report</title><style>" + CSS + "</style></head><body>" + "".join(body) + "</body></html>"
     out = run_dir / "report.html"
     out.write_text(html_doc)
     return out

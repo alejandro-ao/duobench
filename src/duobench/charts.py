@@ -18,7 +18,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from kcbench.judge import DIMENSIONS  # noqa: E402
+from duobench.judge import DIMENSIONS  # noqa: E402
 
 
 def _write_csv(path: Path, header: list[str], rows: list[list]) -> None:

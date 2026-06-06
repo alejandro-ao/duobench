@@ -4,7 +4,7 @@ Sequences: plan → implement → verify per condition×trial, then judge panel 
 build, aggregates, and draws charts. The only agentic work is inside the Pi sessions.
 
 Usage:
-  uv run kcbench run [--trials N] [--conditions a,b,c] [--dry-run] [--out DIR]
+  uv run duobench run [--trials N] [--conditions a,b,c] [--dry-run] [--out DIR]
 """
 
 from __future__ import annotations
@@ -17,17 +17,17 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from kcbench.aggregate import TrialRecord, aggregate
-from kcbench.charts import generate_charts
-from kcbench.config import Condition, Config, ConfigError, load_config
-from kcbench.judge import DIMENSIONS, average_dimensions, judge_panel
-from kcbench.plan_phase import run_plan_phase
-from kcbench.impl_phase import run_impl_phase
-from kcbench.verify import verify_build
-from kcbench.pi_rpc import PiRpcError
-from kcbench.report import generate_report
-from kcbench.ui import make_ui
-from kcbench.fingerprint import make_benchmark_fingerprint
+from duobench.aggregate import TrialRecord, aggregate
+from duobench.charts import generate_charts
+from duobench.config import Condition, Config, ConfigError, load_config
+from duobench.judge import DIMENSIONS, average_dimensions, judge_panel
+from duobench.plan_phase import run_plan_phase
+from duobench.impl_phase import run_impl_phase
+from duobench.verify import verify_build
+from duobench.pi_rpc import PiRpcError
+from duobench.report import generate_report
+from duobench.ui import make_ui
+from duobench.fingerprint import make_benchmark_fingerprint
 
 REPO = Path(__file__).resolve().parents[2]
 PROMPTS = REPO / "prompts"
@@ -146,13 +146,13 @@ def run_condition_trial(
 
 def _main() -> None:
     ap = argparse.ArgumentParser(
-        prog="kcbench",
+        prog="duobench",
         description="Run planner×implementer model benchmarks over Pi RPC.",
         epilog=(
             "Examples:\n"
-            "  kcbench run --dry-run\n"
-            "  kcbench run --conditions kimi-solo --trials 1\n"
-            "  kcbench run --conditions kimi-solo,gpt-x-kimi --trials 3"
+            "  duobench run --dry-run\n"
+            "  duobench run --conditions kimi-solo --trials 1\n"
+            "  duobench run --conditions kimi-solo,gpt-x-kimi --trials 3"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -196,7 +196,7 @@ def _main() -> None:
     cond_root.mkdir(parents=True, exist_ok=True)
     ui = make_ui(args.live)
     ui.start_run(run_dir=run_dir, conditions=conditions, trials=args.trials, dry_run=args.dry_run)
-    ui.log("\n=== kimi-claude-bench ===")
+    ui.log("\n=== duobench ===")
     ui.log(f"mode: {'DRY RUN (no model/API calls)' if args.dry_run else 'REAL RUN'}")
     ui.log(f"run dir: {run_dir}")
     ui.log(f"trials per condition: {args.trials}")
@@ -204,7 +204,7 @@ def _main() -> None:
     for c in conditions:
         ui.log(f"  - {c.id}: planner={c.planner} implementer={c.implementer}")
     if not args.dry_run:
-        ui.log("\nTip: if this is your first run, `kcbench run --dry-run` validates the pipeline without API spend.")
+        ui.log("\nTip: if this is your first run, `duobench run --dry-run` validates the pipeline without API spend.")
     ui.log("")
 
     # --- phase 1: plan + implement + verify per condition×trial ---
@@ -300,7 +300,7 @@ def main() -> None:
         sys.exit(
             "\nERROR: " + str(e) +
             "\n\nTry:\n"
-            "  - `uv run kcbench run --dry-run` to validate local wiring\n"
+            "  - `uv run duobench run --dry-run` to validate local wiring\n"
             "  - check provider/model IDs in config/models.yaml\n"
             "  - rerun with `--debug` for a full traceback"
         )
