@@ -15,6 +15,7 @@ import shutil
 import sys
 import time
 from datetime import datetime, timezone
+from importlib import resources
 from pathlib import Path
 
 from duobench.aggregate import TrialRecord, aggregate
@@ -29,12 +30,12 @@ from duobench.report import generate_report
 from duobench.ui import make_ui
 from duobench.fingerprint import make_benchmark_fingerprint
 
-REPO = Path(__file__).resolve().parents[2]
-PROMPTS = REPO / "prompts"
-
-
 def _load_prompt(name: str) -> str:
-    return (PROMPTS / name).read_text()
+    """Load prompt from ./prompts when present, otherwise from packaged defaults."""
+    local = Path("prompts") / name
+    if local.is_file():
+        return local.read_text()
+    return (resources.files("duobench.defaults.prompts") / name).read_text()
 
 
 def _stub_plan() -> str:
@@ -283,7 +284,7 @@ def _main() -> None:
 
     print(f"\ndone. results.json + {len(written)} chart/csv files in {results_dir}")
     print(f"report: {report_path}")
-    print(f"copied to {top_results}/ for the video")
+    print(f"copied to {top_results}/")
     # leaderboard preview
     ranked = sorted(results["conditions"].items(), key=lambda kv: kv[1]["quality"], reverse=True)
     print("\nleaderboard (quality | cost$ | efficiency):")

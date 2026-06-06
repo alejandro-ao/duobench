@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 
 import yaml
@@ -50,19 +51,27 @@ def _require(cond: bool, msg: str) -> None:
         raise ConfigError(msg)
 
 
+def _read_config_text(path: str | Path, default_name: str) -> str:
+    """Read a config path, falling back to packaged defaults for CLI defaults."""
+    path = Path(path)
+    if path.is_file():
+        return path.read_text()
+    if path.as_posix() == f"config/{default_name}":
+        return (resources.files("duobench.defaults.config") / default_name).read_text()
+    raise ConfigError(f"config not found: {path}")
+
+
 def load_config(
     models_path: str | Path = "config/models.yaml",
     conditions_path: str | Path = "config/conditions.yaml",
 ) -> Config:
-    """Load and validate both config files. Fails fast with a clear error."""
-    models_path = Path(models_path)
-    conditions_path = Path(conditions_path)
+    """Load and validate both config files. Fails fast with a clear error.
 
-    _require(models_path.is_file(), f"models config not found: {models_path}")
-    _require(conditions_path.is_file(), f"conditions config not found: {conditions_path}")
-
-    models_raw = yaml.safe_load(models_path.read_text()) or {}
-    conditions_raw = yaml.safe_load(conditions_path.read_text()) or {}
+    Default CLI paths first use files in the current working directory. If they do not
+    exist, duobench falls back to config files packaged inside the installed tool.
+    """
+    models_raw = yaml.safe_load(_read_config_text(models_path, "models.yaml")) or {}
+    conditions_raw = yaml.safe_load(_read_config_text(conditions_path, "conditions.yaml")) or {}
 
     # --- models ---
     raw_models = models_raw.get("models")

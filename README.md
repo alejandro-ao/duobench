@@ -12,9 +12,18 @@ See `DESIGN.md` for the full design rationale.
 
 ## Install
 
+From a checkout:
+
 ```bash
 uv sync
 uv run playwright install chromium
+```
+
+As a standalone uv tool:
+
+```bash
+uv tool install git+https://github.com/alejandro-ao/agent-synergy-eval.git
+uvx playwright install chromium
 ```
 
 Requires the `pi` binary on PATH (`pi --mode rpc`) with the providers you reference in
@@ -146,6 +155,15 @@ tokens, cache tokens, configured cost, and Pi-reported cost. Use `--no-live` for
 it on.
 
 ## Outputs
+
+By default, each run writes to the current working directory under `runs/<timestamp>/`.
+Use `--out DIR` to choose a different output root. Chart/CSV artifacts are also mirrored to
+`./results/` beside the directory where you invoke the command.
+
+When installed as a uv tool, `duobench` first looks for local `config/` and `prompts/`
+files in the current working directory. If they are absent, it uses packaged defaults, so
+you can run it from an empty experiment directory and keep outputs/config separate from the
+source checkout.
 
 Each run writes `runs/<timestamp>/`:
 
