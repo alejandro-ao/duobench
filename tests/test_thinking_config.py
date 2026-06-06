@@ -46,12 +46,12 @@ def test_pi_session_persistence_controls_no_session_flag(monkeypatch, tmp_path):
 
     monkeypatch.setattr("duobench.pi_rpc.subprocess.Popen", fake_popen)
 
-    with PiSession(cwd=tmp_path, persist_session=True, session_name="duobench webos test"):
+    with PiSession(cwd=tmp_path, persist_session=True, session_name="duobench minidesk test"):
         pass
 
     assert "--no-session" not in captured["args"]
     assert captured["args"][:3] == ["pi", "--mode", "rpc"]
-    assert captured["args"][3:5] == ["--name", "duobench webos test"]
+    assert captured["args"][3:5] == ["--name", "duobench minidesk test"]
 
     with PiSession(cwd=tmp_path, persist_session=False):
         pass

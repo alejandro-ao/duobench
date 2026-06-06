@@ -190,15 +190,14 @@ def _write_fake_transcript(
 
 def _stub_plan(planner_key: str = "stub-planner") -> str:
     return (
-        f"# Dry-run WebOS plan from {planner_key}\n\n"
-        "- Build a desktop shell with a taskbar, launcher, notifications, and windows.\n"
-        "- Implement apps for Files, Notes, Browser, Terminal, Music, Settings, and Games.\n"
-        "- Keep state in localStorage and split behavior into WindowManager, AppRegistry, "
-        "FileSystem, and ThemeManager modules.\n"
+        f"# Dry-run MiniDesk plan from {planner_key}\n\n"
+        "- Build a small desktop shell with a taskbar, clock, desktop icons, and windows.\n"
+        "- Implement exactly three apps: Notes, Calculator, and Todo.\n"
+        "- Persist Notes and Todo state in localStorage. Keep the code simple and file:// safe.\n"
     )
 
 
-def _stub_build(build_dir: Path, *, title: str = "Dry-run WebOS", accent: str = "#7c9cff") -> None:
+def _stub_build(build_dir: Path, *, title: str = "Dry-run MiniDesk", accent: str = "#7c9cff") -> None:
     build_dir.mkdir(parents=True, exist_ok=True)
     (build_dir / "index.html").write_text(
         f"""<!doctype html>
@@ -377,7 +376,7 @@ def _phase_ui(ui, parallel_workers: int):
 
 
 def _pi_session_name(run_label: str, role: str, model_key: str, *, trial: int, condition_id: str | None = None) -> str:
-    parts = ["duobench", "webos", run_label, role]
+    parts = ["duobench", "minidesk", run_label, role]
     if condition_id:
         parts.append(condition_id)
     parts += [model_key, f"trial-{trial}"]
@@ -558,14 +557,14 @@ def run_condition_trial(
     # --- implement ---
     if dry_run:
         accent = f"#{_stable_int(cond.id, 0, 0xFFFFFF):06x}"
-        _stub_build(build_dir, title=f"{cond.id} dry-run WebOS", accent=accent)
+        _stub_build(build_dir, title=f"{cond.id} dry-run MiniDesk", accent=accent)
         usage = _fake_usage(cond.id, "implement", trial)
         ic = compute_cost(usage, implementer)
         _write_fake_transcript(
             phase="implementer",
             model=implementer,
             prompt=prompts["implement"].replace("{plan}", plan_text),
-            assistant_text=f"Built synthetic WebOS for {cond.id}. BUILD COMPLETE",
+            assistant_text=f"Built synthetic MiniDesk for {cond.id}. BUILD COMPLETE",
             usage=usage,
             cost=ic,
             path=trial_dir / "implementer-transcript.json",

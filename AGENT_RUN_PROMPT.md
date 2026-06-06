@@ -17,7 +17,7 @@ Hard requirement:
 Important context:
   - This project benchmarks planner × implementer LLM pairings through Pi RPC.
   - The planner receives `prompts/architect.md` and produces `plan.md`.
-  - The implementer receives `prompts/implement.md` with `{plan}` replaced by the planner output and writes a browser WebOS into `build/`.
+  - The implementer receives `prompts/implement.md` with `{plan}` replaced by the planner output and writes a small MiniDesk browser app into `build/`.
   - Judges score the build from source, screenshots, and smoke-test output.
   - The final review artifact is `runs/<timestamp>/report.html`.
   - Raw transcripts/events are saved under each trial directory.
@@ -67,7 +67,7 @@ Artifacts to preserve/return:
   - `runs/<timestamp>/results/`
   - the whole `runs/<timestamp>/conditions/gpt-x-kimi/trial-0/` directory if possible
 
-Do not commit generated run artifacts unless explicitly asked. The benchmark writes curated chart copies to top-level `results/`; do not push those changes unless asked.
+Do not commit generated run artifacts unless explicitly asked. Canonical outputs stay under `runs/<timestamp>/`; do not push generated artifacts unless asked.
 
 If anything fails:
   - rerun with `--debug` only if necessary

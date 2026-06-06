@@ -24,7 +24,7 @@ def test_fingerprint_is_stable_and_includes_prompt_hashes():
     )
 
     assert fp1.key == fp2.key
-    assert fp1.label.startswith("webos-v1__gpt-5.5-x-kimi-k2.6__")
+    assert fp1.label.startswith("minidesk-v1__gpt-5.5-x-kimi-k2.6__")
     assert fp1.payload["prompts"]["architect"] == sha256_text("plan this")
     assert fp1.payload["prompts"]["implement"] == sha256_text("build this")
     assert fp1.payload["prompts"]["judge"] == sha256_text("score this")

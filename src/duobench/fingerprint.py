@@ -16,7 +16,7 @@ from duobench.config import Condition, Config, Model
 
 
 FINGERPRINT_SCHEMA_VERSION = 1
-DEFAULT_TASK_ID = "webos"
+DEFAULT_TASK_ID = "minidesk"
 DEFAULT_TASK_VERSION = 1
 
 

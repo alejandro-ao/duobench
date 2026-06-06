@@ -2,9 +2,9 @@
 
 Cost-efficiency benchmark for **planner × implementer** LLM duos, run over Pi RPC.
 
-Each condition spawns a fresh *planner* session to design a WebOS, hands the plan text
-(only the plan — not the planner's reasoning) to a fresh *implementer* session that builds
-it, then a judge panel scores the result. Cost is captured per phase, including cached-token usage when Pi reports it; charts show the
+Each condition spawns a fresh *planner* session to design a small MiniDesk browser app,
+hands the plan text (only the plan — not the planner's reasoning) to a fresh
+*implementer* session that builds it, then a judge panel scores the result. Cost is captured per phase, including cached-token usage when Pi reports it; charts show the
 cost/quality trade-off. Nothing about "challenger vs flagship" is baked in — you measure
 whatever combinations you list in config.
 
@@ -189,7 +189,7 @@ uv run duobench run --dry-run --models kimi-k2.6,gpt-5.5,claude-opus-4.8 --trial
 open runs/<timestamp>/report.html
 ```
 
-Dry-run now writes synthetic shared plans, generated WebOS files, transcripts, non-zero
+Dry-run now writes synthetic shared plans, generated MiniDesk files, transcripts, non-zero
 configured costs from `models.yaml` pricing, varied judge scores, `results.json`, chart CSVs,
 PNGs, and the same `report.html` a real run writes.
 
@@ -200,9 +200,9 @@ default session store (normally under `~/.pi/agent/sessions/`) so you can inspec
 Pi's own session UI. Sessions are named like:
 
 ```text
-duobench webos 2026-06-06T19-05-24 planner kimi-k2.6 trial-0
-duobench webos 2026-06-06T19-05-24 implementer gpt-x-kimi kimi-k2.6 trial-0
-duobench webos 2026-06-06T19-05-24 judge gpt-x-kimi panel trial-0 judge=gpt-5.5
+duobench minidesk 2026-06-06T19-05-24 planner kimi-k2.6 trial-0
+duobench minidesk 2026-06-06T19-05-24 implementer gpt-x-kimi kimi-k2.6 trial-0
+duobench minidesk 2026-06-06T19-05-24 judge gpt-x-kimi panel trial-0 judge=gpt-5.5
 ```
 
 Use `--no-pi-sessions` to disable Pi session persistence. Dry runs never create Pi sessions.
@@ -245,7 +245,7 @@ conditions/<id>/trial-<n>/
   implementer-transcript.json raw implementer turns + tool/message stats
   implementer-events.jsonl   raw Pi RPC events from the implementer session
   judge-transcripts/         one raw judge thread per judge model (+ *.events.jsonl)
-  build/                     implementer's files (index.html at root)
+  build/                     implementer's MiniDesk files (index.html at root)
   screenshots/               desktop + per-app launch shots
   verify.json                Playwright smoke signals
   trial.json                 record + judge meta/scores

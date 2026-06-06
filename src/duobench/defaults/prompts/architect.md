@@ -1,59 +1,47 @@
-You are an expert front-end architect and OS designer. I want you to design a complete, desktop-like WebOS that runs entirely in a single browser tab using vanilla JavaScript, HTML, and CSS.
+You are an expert front-end architect. Design a SMALL browser desktop app called **MiniDesk** that can be implemented quickly in vanilla HTML, CSS, and JavaScript.
 
-## Core Requirements
+The goal is a lightweight benchmark task, not a giant operating system. Keep the plan concise and implementation-friendly.
 
-1. **Window Manager**
-   - Draggable, resizable, minimizable, maximizable, closable windows
-   - Z-index management (click to focus, bring to front)
-   - Window title bar with icon, title, and control buttons
-   - Snap-to-edge behavior (optional but nice)
+## Product Requirements
 
-2. **Taskbar**
-   - Bottom-aligned taskbar like Windows/macOS
-   - Start menu / app launcher button
-   - Open window previews / task switching
-   - System tray with clock and notifications
-   - Quick-launch pins
+Build a single-page desktop-like interface that runs directly from `index.html` using `file://` with no server, build step, frameworks, modules, CDNs, or external assets.
 
-3. **Built-in Apps** (each runs inside a window)
-   - **File Manager**: tree view, file listing, create/rename/delete files and folders, breadcrumbs
-   - **Calculator**: standard + scientific modes, calculation history
-   - **Reminders**: create, edit, delete reminders with due dates, localStorage persistence
-   - **Text Editor**: simple notepad with open/save (to the virtual file system)
-   - **Settings**: themes (light/dark/custom), wallpaper selector, system preferences
+Required UI:
 
-4. **Games** (each runs inside a window)
-   - **Snake**: classic snake with score, high score persistence, increasing speed
-   - **Tetris**: full tetris with hold piece, next piece preview, line clearing, scoring, levels
-   - Bonus: **Minesweeper** or **2048** if the architecture supports easy addition
+1. **Desktop shell**
+   - A visible desktop area with id or class containing `desktop`.
+   - A visible bottom taskbar with id or class containing `taskbar`.
+   - A clock in the taskbar.
+   - A polished but simple visual style.
 
-5. **App System**
-   - App registry: each app is a self-contained module with metadata (name, icon, factory function)
-   - Apps can be launched from Start Menu, desktop icons, or taskbar
-   - Clean API for adding new apps without modifying core OS code
+2. **Three launchable apps**
+   - At least three visible desktop icons using `.desktop-icon` and/or `data-app` attributes.
+   - Clicking each icon opens a visible window element using class `.window` or `.os-window`.
+   - Windows must have a title bar and close button.
+   - Windows should be draggable if practical, but dragging is optional.
 
-6. **Virtual File System**
-   - In-memory file system with folders and files
-   - Persist to localStorage (serialize/deserialize)
-   - Used by File Manager and Text Editor
+3. **Required apps**
+   - **Notes**: a textarea; text persists in `localStorage`.
+   - **Calculator**: buttons or inputs for basic arithmetic; at minimum supports add/subtract/multiply/divide through a simple expression field or keypad.
+   - **Todo**: add todos, mark complete, delete todos; persists in `localStorage`.
 
-7. **Design & UX**
-   - Modern, clean aesthetic (think Windows 11 or macOS)
-   - Smooth animations for window open/close/minimize
-   - Responsive: works on different screen sizes
-   - Wallpaper support with a few built-in options
-   - Context menus (right-click on desktop, files, taskbar)
+4. **Quality expectations**
+   - All logic can live in one `index.html`, or in `index.html` plus a small `style.css` and `script.js`.
+   - Prefer simple, robust code over complex architecture.
+   - No ES modules. Use plain script tags so the app works over `file://`.
+   - No external images; use CSS gradients and emoji/icons if desired.
 
-## Deliverables
+## Deliverable — concise architecture plan
 
-Provide:
-1. **Architecture Overview**: high-level component diagram and data flow
-2. **File Structure**: recommended folder/file organization
-3. **Core Classes/Modules**: WindowManager, Taskbar, AppRegistry, FileSystem, etc. with key methods
-4. **App Interface**: what each app must implement to integrate with the OS
-5. **CSS Architecture**: how theming works, CSS variables, layout approach
-6. **Game Loop Design**: how games integrate without blocking the OS event loop
-7. **State Management**: how global state is handled (window states, file system, settings)
-8. **Implementation Order**: recommended sequence to build this incrementally
+Write a compact implementation plan for the developer. Do NOT write full working code.
 
-Be specific. Include code sketches for the core classes and interfaces. The goal is that a skilled developer could take your plan and implement this in a few hours.
+Include:
+
+1. Recommended file structure.
+2. DOM structure and important CSS classes/ids.
+3. JavaScript state shape.
+4. Functions/components to implement.
+5. App behavior for Notes, Calculator, and Todo.
+6. Acceptance criteria.
+
+Keep the plan under 900 words. The implementer should be able to finish in under 10 minutes.

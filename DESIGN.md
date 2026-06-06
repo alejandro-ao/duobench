@@ -37,8 +37,9 @@ is a config edit.
   `--models a,b,c`, which expands to the full matrix (N planner samples, N² builds per
   trial). `config/conditions.yaml` is still supported for hand-picked/manual pairings.
   There are no challenger/flagship semantics baked into the tool.
-- **Benchmark task (1):** Build a WebOS from scratch (vanilla JS/HTML/CSS) — one rich,
-  visual artifact. Prompt is the existing WebOS prompt from the video `plan.md`.
+- **Benchmark task (1):** Build MiniDesk, a small desktop-like browser app with Notes,
+  Calculator, and Todo apps. It is intentionally lightweight so real model runs complete
+  quickly while still exercising planning, implementation, persistence, and UI quality.
 
 ### Conditions for this video (7, defined in config)
 
@@ -162,7 +163,7 @@ there is **no special-casing per model** — the harness treats all three identi
 For real runs, duobench leaves Pi session persistence enabled by default and passes
 `--name` to each RPC subprocess. Planner, implementer, and judge sessions are therefore
 available in Pi's normal session browser/store (typically `~/.pi/agent/sessions/`) with
-names containing `duobench`, the task (`webos`), run timestamp, role, condition/model, and
+names containing `duobench`, the task (`minidesk`), run timestamp, role, condition/model, and
 trial. `--no-pi-sessions` disables this if you only want duobench's own transcripts.
 
 - **Kimi:** already configured in the user's Pi setup (Kimi API). No extra work.
@@ -186,7 +187,7 @@ blocking the whole suite. A session that hits the ceiling is recorded as a
 `timeout`/`failure` data point (not silently dropped).
 
 The implementer phase supports a bounded **multi-turn loop** (`follow_up` "continue
-building") so a large WebOS can be completed across turns — turns are counted and cost
+building") so the app can be completed across turns — turns are counted and cost
 is accumulated, so verbose builders still pay for it in the metrics.
 
 ---
@@ -289,7 +290,7 @@ duobench/
 │   ├── models.yaml                # flat model registry + explicit judges list
 │   └── conditions.yaml            # explicit planner×implementer combinations
 ├── prompts/
-│   ├── architect.md               # WebOS planning prompt (from video plan.md)
+│   ├── architect.md               # MiniDesk planning prompt
 │   ├── implement.md               # build-from-plan prompt
 │   └── judge.md                   # rubric + strict-JSON scoring instructions
 ├── src/duobench/
@@ -306,7 +307,7 @@ duobench/
 │       ├── conditions/
 │       │   └── <planner>__<impl>/[trial-n/]
 │       │       ├── plan.md
-│       │       ├── build/         # the generated WebOS
+│       │       ├── build/         # the generated MiniDesk app
 │       │       ├── screenshots/
 │       │       └── tokens.json    # per-phase token + cost
 │       ├── judgments/             # raw per-judge JSON scores
@@ -339,8 +340,8 @@ overwrite a top-level `results/` directory; every run keeps its own timestamped 
 
 ## 11. Resolved decisions
 
-1. **WebOS output** — allow a **multi-file project tree** under `build/`. Verify + judge
-   read the whole tree; entry point is `build/index.html`.
+1. **MiniDesk output** — allow either a single-file app or small project tree under
+   `build/`. Verify + judge read the whole tree; entry point is `build/index.html`.
 2. **Judge temperature** — **pinned to 0** wherever the provider supports it (deterministic
    scoring). Recorded per-judge in case a provider ignores it.
 3. **Smoke-test "boots OK" threshold** — chosen by us: a build counts as booting if it

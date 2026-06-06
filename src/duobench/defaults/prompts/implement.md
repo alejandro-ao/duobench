@@ -1,20 +1,26 @@
-You are an expert front-end developer. Implement a complete WebOS based on the architecture plan below. Use vanilla JavaScript, HTML, and CSS only — no frameworks, no build step, no external dependencies or CDNs.
+You are an expert front-end developer. Implement **MiniDesk**, a small desktop-like browser app, based on the architecture plan below.
+
+Use vanilla HTML, CSS, and JavaScript only. No frameworks, no build step, no external dependencies, no CDNs, and no ES modules. The app must work by opening `index.html` directly via `file://`.
 
 ## Architecture plan
 
 {plan}
 
-## Requirements
+## Hard requirements
 
-- Write all files into the CURRENT working directory. The entry point MUST be `index.html` at the root of the working directory, opening directly in a browser with no server or build step.
-- A multi-file project tree is encouraged (e.g. `css/`, `js/`, `js/apps/`). Reference files with relative paths so `file://` loading works.
-- All code must be modular and well-commented.
-- Implement every app and game described in the plan.
-- The virtual file system must persist to localStorage.
-- Include at least 3 built-in wallpapers and light/dark theme support.
-- Make it visually polished — gradients, shadows, smooth transitions.
-- Windows must be draggable, resizable, minimizable, maximizable, and closable.
-- Games must run smoothly without blocking the UI.
-- Do NOT use ES module `import`/`export` with `type="module"` unless every script is loaded via relative paths that work over `file://`. Prefer plain `<script>` tags or ensure module paths are relative.
+- Write files into the CURRENT working directory.
+- The entry point MUST be `index.html` at the root.
+- Keep the implementation small and robust. Prefer one `index.html` with embedded CSS/JS, or at most `index.html`, `style.css`, and `script.js`.
+- Render a desktop element whose id/class contains `desktop`.
+- Render a taskbar element whose id/class contains `taskbar`.
+- Render at least three launchable app icons using `.desktop-icon` and/or `data-app`.
+- Clicking each icon must create/show a visible `.window` or `.os-window` element.
+- Implement exactly these apps:
+  - Notes: textarea persisted to localStorage.
+  - Calculator: basic arithmetic.
+  - Todo: add, complete, delete todos persisted to localStorage.
+- Include a title bar and close button for each window.
+- Avoid `type="module"`; use normal `<script>` so it works over `file://`.
+- Do not spend time on advanced features. No games, no virtual file system, no complex window manager.
 
-Start by creating the project structure, then implement each module in the recommended order from the plan. Build the entire thing end to end. When you believe the build is complete and functional, say so explicitly.
+When the app is complete and functional, reply with exactly: BUILD COMPLETE
