@@ -27,6 +27,7 @@ from kcbench.verify import verify_build
 from kcbench.pi_rpc import PiRpcError
 from kcbench.report import generate_report
 from kcbench.ui import make_ui
+from kcbench.fingerprint import make_benchmark_fingerprint
 
 REPO = Path(__file__).resolve().parents[2]
 PROMPTS = REPO / "prompts"
@@ -74,8 +75,16 @@ def run_condition_trial(
     dry_run: bool,
     plan_timeout: float,
     impl_timeout: float,
+    judge_timeout: float,
     ui=None,
 ) -> tuple[TrialRecord, dict]:
+    benchmark = make_benchmark_fingerprint(
+        cfg, cond, prompts,
+        dry_run=dry_run,
+        plan_timeout=plan_timeout,
+        impl_timeout=impl_timeout,
+        judge_timeout=judge_timeout,
+    )
     planner = cfg.model(cond.planner)
     implementer = cfg.model(cond.implementer)
     build_dir = trial_dir / "build"
@@ -128,7 +137,10 @@ def run_condition_trial(
         "screenshots": vres.screenshots,
     }
     (trial_dir / "trial.json").write_text(json.dumps(
-        {"record": record.__dict__, "meta": record_meta}, indent=2, default=str))
+        {"benchmark": benchmark.to_dict(), "record": record.__dict__, "meta": record_meta},
+        indent=2,
+        default=str,
+    ))
     return record, record_meta
 
 
@@ -206,6 +218,7 @@ def _main() -> None:
                 cfg, cond, trial, trial_dir, prompts,
                 dry_run=args.dry_run,
                 plan_timeout=args.plan_timeout, impl_timeout=args.impl_timeout,
+                judge_timeout=args.judge_timeout,
                 ui=ui,
             )
             records.append(rec)
@@ -220,8 +233,9 @@ def _main() -> None:
                 rec.per_judge[jk] = {d: 6 for d in DIMENSIONS}
             rec.dimensions = {d: 6.0 for d in DIMENSIONS}
             trial_dir = Path(meta["build_dir"]).parent
+            existing_trial = json.loads((trial_dir / "trial.json").read_text())
             (trial_dir / "trial.json").write_text(json.dumps(
-                {"record": rec.__dict__, "meta": meta, "judge_scores": []},
+                {"benchmark": existing_trial.get("benchmark"), "record": rec.__dict__, "meta": meta, "judge_scores": []},
                 indent=2, default=str,
             ))
             continue
@@ -237,8 +251,14 @@ def _main() -> None:
         }
         rec.dimensions = average_dimensions(scores)
         trial_dir = Path(meta["build_dir"]).parent
+        existing_trial = json.loads((trial_dir / "trial.json").read_text())
         (trial_dir / "trial.json").write_text(json.dumps(
-            {"record": rec.__dict__, "meta": meta, "judge_scores": [s.to_dict() for s in scores]},
+            {
+                "benchmark": existing_trial.get("benchmark"),
+                "record": rec.__dict__,
+                "meta": meta,
+                "judge_scores": [s.to_dict() for s in scores],
+            },
             indent=2, default=str,
         ))
 

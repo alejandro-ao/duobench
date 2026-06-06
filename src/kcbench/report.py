@@ -101,6 +101,7 @@ def generate_report(run_dir: Path) -> Path:
         verify = _load_json(td / "verify.json")
         rec = trial.get("record", {})
         meta = trial.get("meta", {})
+        benchmark = trial.get("benchmark") or {}
         build_index = td / "build" / "index.html"
         body.append(f"<section id='{html.escape(anchor)}' class='card'><h2>{html.escape(td.parent.name)} / {html.escape(td.name)}</h2>")
         body.append("".join([
@@ -110,6 +111,8 @@ def generate_report(run_dir: Path) -> Path:
             f"<span class='pill'>cost: {_fmt_usd(rec.get('cost_usd',0))}</span>",
             f"<span class='pill {'ok' if verify.get('boots_ok') else 'bad'}'>boots_ok: {verify.get('boots_ok')}</span>",
         ]))
+        if benchmark.get("label"):
+            body.append(f"<p class='muted'>benchmark: <code>{html.escape(str(benchmark.get('label')))}</code></p>")
         if build_index.exists():
             rel = _rel(run_dir, build_index)
             body.append(f"<p><a href='{rel}' target='_blank'>Open generated WebOS in a new tab</a></p><iframe class='build-frame' src='{rel}'></iframe>")
