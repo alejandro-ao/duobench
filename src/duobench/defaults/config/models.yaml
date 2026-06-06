@@ -26,4 +26,3 @@ models:
 judges:
   - kimi-k2.6
   - gpt-5.5
-  - claude-opus-4.8
