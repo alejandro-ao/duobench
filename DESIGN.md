@@ -250,18 +250,19 @@ These feed **Code correctness** (objective pass/fail) and **Visual/UX** (screens
 
 ## 8. Outputs / charts
 
-`results/` (committed, for the video):
+Each run writes canonical artifacts under `runs/<timestamp>/`:
 
-- `leaderboard.png` — overall averaged score per condition (bar)
-- `dimension-radar.png` — per-condition profile across the 4 dimensions
-- `cost-vs-quality.png` — **the money chart**: X = $ spent, Y = avg quality, point per
-  condition. The trade-off winner is whichever condition sits high + far-left.
-- `self-bias-matrix.png` — judge × build heatmap
-- `results.json` — full numeric results (also the data source for all charts)
+- `report.html` — visual report with builds, screenshots, transcripts, timing/tokens/cost
+- `results.json` — full numeric aggregate results
+- `results/leaderboard.png` — overall averaged score per condition (bar)
+- `results/dimension-radar.png` — per-condition profile across the judged dimensions
+- `results/cost-vs-quality.png` — **the money chart**: X = $ spent, Y = avg quality, point
+  per condition. The trade-off winner is whichever condition sits high + far-left.
+- `results/self-bias-matrix.png` — judge × build heatmap
 
 Every chart also writes its underlying numbers as CSV (`leaderboard.csv`,
-`dimensions.csv`, `cost-vs-quality.csv`, `self-bias.csv`) for re-plotting in your own
-video tooling.
+`dimensions.csv`, `cost-vs-quality.csv`, `self-bias.csv`) beside the PNG in that run's
+`results/` directory.
 
 With `--trials 3`, charts show mean + error bars.
 
@@ -299,12 +300,13 @@ duobench/
 │       │       ├── screenshots/
 │       │       └── tokens.json    # per-phase token + cost
 │       ├── judgments/             # raw per-judge JSON scores
-│       └── results.json
-└── results/                       # COMMITTED — final charts + results.json for the video
+│       ├── results.json
+│       ├── report.html
+│       └── results/               # charts + CSVs for this run only
 ```
 
-`runs/` (raw builds, screenshots, browser binaries) is gitignored; only curated `results/`
-artifacts are committed.
+`runs/` (raw builds, screenshots, browser binaries) is gitignored. The CLI does not
+overwrite a top-level `results/` directory; every run keeps its own timestamped results.
 
 ---
 
@@ -339,6 +341,6 @@ artifacts are committed.
    underlying data to CSV (see #6).
 5. **`--dry-run` mode** — yes. Stubs all model calls (canned plan/build/scores) and skips
    real Pi spawns so the full pipeline wiring can be tested cheaply end-to-end.
-6. **CSV export** — yes. Alongside each chart in `results/`, write the raw numbers as CSV
-   (`leaderboard.csv`, `dimensions.csv`, `cost-vs-quality.csv`, `self-bias.csv`) for
-   re-plotting in your own video tooling.
+6. **CSV export** — yes. Alongside each chart in `runs/<timestamp>/results/`, write the
+   raw numbers as CSV (`leaderboard.csv`, `dimensions.csv`, `cost-vs-quality.csv`,
+   `self-bias.csv`) for re-plotting in your own video tooling.

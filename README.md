@@ -190,9 +190,10 @@ PNGs, and the same `report.html` a real run writes.
 
 ## Outputs
 
-By default, each run writes to the current working directory under `runs/<timestamp>/`.
-Use `--out DIR` to choose a different output root. Chart/CSV artifacts are also mirrored to
-`./results/` beside the directory where you invoke the command.
+By default, each run writes canonical outputs to the current working directory under
+`runs/<timestamp>/`. Use `--out DIR` to choose a different output root. Runs do not
+overwrite top-level `./results/`; the CLI prints the run directory, results directory,
+`results.json`, and clickable `report.html` file URI at the end.
 
 When installed as a uv tool, `duobench` first looks for local `config/` and `prompts/`
 files in the current working directory. If they are absent, it uses packaged defaults, so
@@ -237,8 +238,6 @@ Regenerate a report for an existing run:
 ```bash
 uv run duobench report runs/<timestamp>
 ```
-
-Committed chart/CSV artifacts are also mirrored to top-level `results/`.
 
 ## Scoring
 

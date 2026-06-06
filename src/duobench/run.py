@@ -893,11 +893,6 @@ def _main() -> None:
 
     results_dir = run_dir / "results"
     written = generate_charts(results, results_dir)
-    # mirror committed artifacts to top-level results/ for the video
-    top_results = Path("results")
-    top_results.mkdir(exist_ok=True)
-    for f in written + [run_dir / "results.json"]:
-        shutil.copy(f, top_results / f.name)
 
     if ui:
         ui.start_phase("Generating report", "HTML")
@@ -906,9 +901,16 @@ def _main() -> None:
         ui.end_phase("complete")
         ui.stop()
 
-    print(f"\ndone. results.json + {len(written)} chart/csv files in {results_dir}")
-    print(f"report: {report_path}")
-    print(f"copied to {top_results}/")
+    abs_run_dir = run_dir.resolve()
+    abs_results_dir = results_dir.resolve()
+    abs_results_json = (run_dir / "results.json").resolve()
+    abs_report_path = report_path.resolve()
+    print(f"\ndone. results.json + {len(written)} chart/csv files written for this run")
+    print(f"run dir: {abs_run_dir}")
+    print(f"results dir: {abs_results_dir}")
+    print(f"results json: {abs_results_json}")
+    print(f"report: {abs_report_path}")
+    print(f"open report: {abs_report_path.as_uri()}")
     # leaderboard preview
     ranked = sorted(results["conditions"].items(), key=lambda kv: kv[1]["quality"], reverse=True)
     print("\nleaderboard (quality | cost$ | efficiency):")
