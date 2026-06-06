@@ -74,10 +74,16 @@ For a copy/paste prompt you can give to a cloud coding agent, see
 # validate the full pipeline with stubbed model calls (no API spend)
 uv run duobench run --dry-run
 
-# one real condition, one trial
+# simplest real benchmark: every model plans once, then every planner×implementer pair builds
+uv run duobench run --models kimi-k2.6,gpt-5.5,claude-opus-4.8 --trials 1
+
+# rectangular matrix: only these planners crossed with only these implementers
+uv run duobench run --planners kimi-k2.6,gpt-5.5 --implementers kimi-k2.6 --trials 1
+
+# legacy/manual mode: one explicit condition from conditions.yaml
 uv run duobench run --conditions gpt-solo --trials 1
 
-# the whole config, 3 trials each (for error bars)
+# the whole conditions.yaml config, 3 trials each (for error bars)
 uv run duobench run --trials 3
 ```
 
@@ -86,8 +92,11 @@ uv run duobench run --trials 3
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--trials N` | `1` | Trials per condition (variance / error bars) |
-| `--conditions a,b,c` | all | Comma-separated condition ids to run |
-| `--parallel auto\|N` | `auto` | Planner/build concurrency (`auto` currently caps at 2 workers; use `1` for serial) |
+| `--conditions a,b,c` | all from config | Comma-separated condition ids to run from `conditions.yaml` |
+| `--models a,b,c` | off | Generate a full planner×implementer matrix from model keys (N plans, N² builds per trial) |
+| `--planners a,b` | off | Planner keys for a rectangular matrix; use with `--implementers` |
+| `--implementers a,b` | off | Implementer keys for a rectangular matrix; use with `--planners` |
+| `--parallel auto\|all\|N` | `auto` | Planner/build concurrency (`auto` caps at 2 workers; `all` runs every job in each phase; use `1` for serial) |
 | `--dry-run` | off | Stub all model calls + canned judge scores |
 | `--out DIR` | `runs` | Output root |
 | `--models-config` | `config/models.yaml` | Model registry |
@@ -124,7 +133,9 @@ tail -f /tmp/duobench.log
 
 ## Configuration
 
-Two flat files, no tiers, fully manual retargeting.
+Two flat files, no tiers. For the common case, list models once in `models.yaml` and use
+`--models` to generate the full planner×implementer matrix. `conditions.yaml` remains a
+manual preset file for hand-picked subsets.
 
 **`config/models.yaml`** — registry + judge panel:
 
@@ -143,7 +154,7 @@ judges:
   - gpt-5.5
 ```
 
-**`config/conditions.yaml`** — combinations (`planner`/`implementer` are keys into `models`):
+**`config/conditions.yaml`** — optional manual combinations (`planner`/`implementer` are keys into `models`):
 
 ```yaml
 conditions:
@@ -151,9 +162,10 @@ conditions:
   - { id: gpt-x-kimi, planner: gpt-5.5,   implementer: kimi-k2.6 }
 ```
 
-To benchmark a different lineup (e.g. DeepSeek × MiniMax) just rewrite these two files.
-Config is validated up front: any planner/implementer/judge that isn't a registered model
-key fails fast before any model is called.
+To benchmark a different lineup (e.g. DeepSeek × MiniMax), add the models to
+`models.yaml`, then run `duobench run --models deepseek,minimax,...`. Config is validated
+up front: any planner/implementer/judge that isn't a registered model key fails fast before
+any model is called.
 
 ## Live CLI
 
@@ -173,14 +185,16 @@ files in the current working directory. If they are absent, it uses packaged def
 you can run it from an empty experiment directory and keep outputs/config separate from the
 source checkout.
 
-Within a run, planner outputs are shared by `(planner, trial)`: if `kimi-solo` and
-`kimi-x-gpt` both use the same Kimi planner for trial 0, duobench calls Kimi once, then
-copies that plan into each condition's trial directory. Condition-level cost still includes
-the planner cost for fair comparisons.
+Within a run, execution is deliberately two-stage and simple: all unique planner samples
+run first, keyed by `(planner, trial)`, then all planner×implementer builds run from those
+plans. For `--models a,b,c --trials 1`, that means 3 planner runs followed by 9
+implementation/verification runs. Condition-level cost still includes the copied planner
+cost for fair comparisons.
 
 Planner jobs and condition build/verify jobs run with bounded concurrency by default
-(`--parallel auto`, currently up to 2 workers). Use `--parallel 1` for fully serial runs or
-`--parallel N` to set an explicit global cap. Judging remains serial for now.
+(`--parallel auto`, currently up to 2 workers). Use `--parallel all` to launch every job in
+each phase concurrently, `--parallel 1` for fully serial runs, or `--parallel N` to set an
+explicit global cap. Judging remains serial for now.
 
 Each run writes `runs/<timestamp>/`:
 

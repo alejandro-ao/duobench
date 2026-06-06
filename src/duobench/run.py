@@ -33,6 +33,7 @@ from duobench.ui import make_ui
 from duobench.fingerprint import make_benchmark_fingerprint
 
 AUTO_PARALLEL_WORKERS = 2
+ALL_PARALLEL_WORKERS = 10_000
 
 
 @dataclass(frozen=True)
@@ -95,14 +96,108 @@ def _stub_build(build_dir: Path) -> None:
     )
 
 
+def _parse_csv(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def _dedupe_ordered(values: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            out.append(value)
+    return out
+
+
+def _validate_model_keys(cfg: Config, keys: list[str], flag: str) -> list[str]:
+    keys = _dedupe_ordered(keys)
+    if not keys:
+        raise ConfigError(f"{flag} must include at least one model key")
+    missing = [key for key in keys if key not in cfg.models]
+    if missing:
+        known = ", ".join(cfg.models)
+        raise ConfigError(f"unknown model key(s) in {flag}: {', '.join(missing)}. Known models: {known}")
+    return keys
+
+
 def select_conditions(cfg: Config, only: list[str] | None) -> list[Condition]:
     if not only:
         return cfg.conditions
     by_id = {c.id: c for c in cfg.conditions}
     missing = [o for o in only if o not in by_id]
     if missing:
-        sys.exit(f"unknown condition id(s): {', '.join(missing)}")
+        raise ConfigError(f"unknown condition id(s): {', '.join(missing)}")
     return [by_id[o] for o in only]
+
+
+def make_matrix_conditions(cfg: Config, planners: list[str], implementers: list[str]) -> list[Condition]:
+    """Generate the full planner×implementer matrix for the requested model keys."""
+    planners = _validate_model_keys(cfg, planners, "--planners/--models")
+    implementers = _validate_model_keys(cfg, implementers, "--implementers/--models")
+    conditions: list[Condition] = []
+    used_ids: set[str] = set()
+    for planner in planners:
+        for implementer in implementers:
+            base = (
+                f"{_safe_path_part(planner)}-solo"
+                if planner == implementer
+                else f"{_safe_path_part(planner)}-x-{_safe_path_part(implementer)}"
+            )
+            cid = base
+            suffix = 2
+            while cid in used_ids:
+                cid = f"{base}-{suffix}"
+                suffix += 1
+            used_ids.add(cid)
+            conditions.append(Condition(id=cid, planner=planner, implementer=implementer))
+    return conditions
+
+
+def select_run_conditions(
+    cfg: Config,
+    *,
+    condition_ids: list[str] | None = None,
+    model_keys: list[str] | None = None,
+    planner_keys: list[str] | None = None,
+    implementer_keys: list[str] | None = None,
+) -> tuple[list[Condition], str]:
+    """Resolve CLI selection into concrete planner×implementer conditions.
+
+    The simple path is ``--models a,b,c``: it creates one shared planning run per
+    model/trial and then every planner×implementer build. ``--conditions`` remains as a
+    backwards-compatible escape hatch for hand-picked pairs from conditions.yaml.
+    """
+    condition_ids = condition_ids or []
+    model_keys = model_keys or []
+    planner_keys = planner_keys or []
+    implementer_keys = implementer_keys or []
+
+    matrix_requested = bool(model_keys or planner_keys or implementer_keys)
+    if condition_ids and matrix_requested:
+        raise ConfigError("use either --conditions or matrix flags (--models/--planners/--implementers), not both")
+
+    if condition_ids:
+        return select_conditions(cfg, condition_ids), "explicit conditions from conditions.yaml"
+
+    if model_keys:
+        if planner_keys or implementer_keys:
+            raise ConfigError("--models cannot be combined with --planners or --implementers; use one style")
+        keys = _validate_model_keys(cfg, model_keys, "--models")
+        return make_matrix_conditions(cfg, keys, keys), f"full matrix from --models ({len(keys)} models)"
+
+    if planner_keys or implementer_keys:
+        if not planner_keys or not implementer_keys:
+            raise ConfigError("provide both --planners and --implementers, or use --models for a square matrix")
+        planners = _validate_model_keys(cfg, planner_keys, "--planners")
+        implementers = _validate_model_keys(cfg, implementer_keys, "--implementers")
+        return make_matrix_conditions(cfg, planners, implementers), (
+            f"rectangular matrix from --planners/--implementers ({len(planners)}×{len(implementers)})"
+        )
+
+    return cfg.conditions, "explicit conditions from conditions.yaml"
 
 
 def _safe_path_part(value: str) -> str:
@@ -122,12 +217,14 @@ def _unique_planners(conditions: list[Condition]) -> list[str]:
 def resolve_parallel(value: str, *, auto_default: int = AUTO_PARALLEL_WORKERS) -> int:
     if value == "auto":
         return max(1, auto_default)
+    if value == "all":
+        return ALL_PARALLEL_WORKERS
     try:
         workers = int(value)
     except ValueError as e:
-        raise ConfigError("--parallel must be 'auto' or a positive integer") from e
+        raise ConfigError("--parallel must be 'auto', 'all', or a positive integer") from e
     if workers < 1:
-        raise ConfigError("--parallel must be 'auto' or a positive integer")
+        raise ConfigError("--parallel must be 'auto', 'all', or a positive integer")
     return workers
 
 
@@ -413,7 +510,8 @@ def _main() -> None:
         epilog=(
             "Examples:\n"
             "  duobench run --dry-run\n"
-            "  duobench run --conditions kimi-solo --trials 1\n"
+            "  duobench run --models kimi-k2.6,gpt-5.5 --trials 1\n"
+            "  duobench run --planners kimi-k2.6,gpt-5.5 --implementers gpt-5.5 --trials 3\n"
             "  duobench run --conditions kimi-solo,gpt-x-kimi --trials 3"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -421,7 +519,13 @@ def _main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     rp = sub.add_parser("run", help="run the benchmark")
     rp.add_argument("--trials", type=int, default=1)
-    rp.add_argument("--conditions", type=str, default="", help="comma-separated condition ids")
+    rp.add_argument("--conditions", type=str, default="", help="comma-separated condition ids from conditions.yaml")
+    rp.add_argument("--models", type=str, default="",
+                    help="comma-separated model keys; generate the full planner×implementer matrix")
+    rp.add_argument("--planners", type=str, default="",
+                    help="comma-separated planner model keys for a rectangular matrix")
+    rp.add_argument("--implementers", type=str, default="",
+                    help="comma-separated implementer model keys for a rectangular matrix")
     rp.add_argument("--dry-run", action="store_true", help="stub all model calls")
     rp.add_argument("--out", type=str, default="runs")
     rp.add_argument("--models-config", type=str, default="config/models.yaml")
@@ -430,7 +534,7 @@ def _main() -> None:
     rp.add_argument("--impl-timeout", type=float, default=1800.0)
     rp.add_argument("--judge-timeout", type=float, default=300.0)
     rp.add_argument("--parallel", type=str, default="auto",
-                    help="planner/build concurrency: 'auto' (default) or a positive integer; use 1 for serial")
+                    help="planner/build concurrency: 'auto' (default), 'all', or a positive integer; use 1 for serial")
     rp.add_argument("--live", action=argparse.BooleanOptionalAction, default=None,
                     help="enable/disable the Rich live dashboard (default: auto when attached to a TTY)")
     rp.add_argument("--debug", action="store_true", help="show full Python tracebacks on errors")
@@ -445,8 +549,13 @@ def _main() -> None:
         return
 
     cfg = load_config(args.models_config, args.conditions_config)
-    only = [c.strip() for c in args.conditions.split(",") if c.strip()] or None
-    conditions = select_conditions(cfg, only)
+    conditions, selection_mode = select_run_conditions(
+        cfg,
+        condition_ids=_parse_csv(args.conditions),
+        model_keys=_parse_csv(args.models),
+        planner_keys=_parse_csv(args.planners),
+        implementer_keys=_parse_csv(args.implementers),
+    )
     parallel_workers = resolve_parallel(args.parallel)
 
     prompts = {
@@ -465,7 +574,13 @@ def _main() -> None:
     ui.log(f"mode: {'DRY RUN (no model/API calls)' if args.dry_run else 'REAL RUN'}")
     ui.log(f"run dir: {run_dir}")
     ui.log(f"trials per condition: {args.trials}")
-    ui.log(f"parallel workers: {args.parallel} ({parallel_workers} max)")
+    ui.log(f"selection: {selection_mode}")
+    parallel_label = "all jobs in each phase" if args.parallel == "all" else f"{parallel_workers} max"
+    ui.log(f"parallel workers: {args.parallel} ({parallel_label})")
+    plan_jobs = len(_unique_planners(conditions)) * args.trials
+    impl_jobs = len(conditions) * args.trials
+    judge_jobs = impl_jobs * len(cfg.judges)
+    ui.log(f"phase plan: {plan_jobs} shared planner run(s) → build: {impl_jobs} implementation run(s) → judge: {judge_jobs} judge run(s)")
     ui.log("conditions:")
     for c in conditions:
         ui.log(f"  - {c.id}: planner={c.planner} implementer={c.implementer}")

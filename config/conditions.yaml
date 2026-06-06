@@ -1,6 +1,7 @@
-# Explicit planner×implementer combinations. `planner` and `implementer` are keys into
-# models.yaml. No tiers, no auto-expansion — to test a different lineup, just rewrite
-# these rows (e.g. deepseek × minimax pairings). `id` is used for output filenames/charts.
+# Optional named planner×implementer presets. `planner` and `implementer` are keys into
+# models.yaml. For the common full cross-product benchmark, prefer the CLI matrix:
+#   duobench run --models kimi-k2.6,gpt-5.5,claude-opus-4.8
+# `id` is used for output filenames/charts when selecting these presets.
 conditions:
   - { id: kimi-solo,   planner: kimi-k2.6,       implementer: kimi-k2.6 }
   - { id: gpt-solo,    planner: gpt-5.5,         implementer: gpt-5.5 }

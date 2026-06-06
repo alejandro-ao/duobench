@@ -20,8 +20,9 @@ def _cfg() -> Config:
     return Config(models=models, judges=["kimi", "gpt"], conditions=conditions)
 
 
-def test_resolve_parallel_accepts_auto_and_positive_ints():
+def test_resolve_parallel_accepts_auto_all_and_positive_ints():
     assert resolve_parallel("auto") == 2
+    assert resolve_parallel("all") >= 10_000
     assert resolve_parallel("1") == 1
     assert resolve_parallel("4") == 4
 

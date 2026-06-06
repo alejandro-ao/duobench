@@ -33,9 +33,10 @@ is a config edit.
 - **Models:** any set defined in `config/models.yaml` (a flat registry). For this video:
   Kimi K2.6, GPT-5.5, Claude Opus 4.8. No "tiers" — every model is just an entry.
 - **Roles (2):** Planner (architect) + Implementer (coder).
-- **Conditions:** explicit planner×implementer **combinations** listed in
-  `config/conditions.yaml`. No auto-expansion, no challenger/flagship semantics — you write
-  exactly the pairings you want measured.
+- **Conditions:** concrete planner×implementer pairs. The simplest CLI path is
+  `--models a,b,c`, which expands to the full matrix (N planner samples, N² builds per
+  trial). `config/conditions.yaml` is still supported for hand-picked/manual pairings.
+  There are no challenger/flagship semantics baked into the tool.
 - **Benchmark task (1):** Build a WebOS from scratch (vanilla JS/HTML/CSS) — one rich,
   visual artifact. Prompt is the existing WebOS prompt from the video `plan.md`.
 
@@ -51,9 +52,9 @@ is a config edit.
 | 6 | Kimi      | Opus 4.8    | hybrid |
 | 7 | Opus 4.8  | Kimi        | hybrid |
 
-These are just the rows currently in `conditions.yaml`. To test a different lineup later,
-replace the rows (e.g. `deepseek × minimax` pairings). The harness iterates whatever is
-there — nothing in `src/` changes.
+These can be produced directly with `--models kimi-k2.6,gpt-5.5,claude-opus-4.8`, or by
+listing equivalent rows in `conditions.yaml`. To test a different lineup later, add the
+model entries and pass a new `--models` list — nothing in `src/` changes.
 
 ### Trials
 
@@ -64,8 +65,9 @@ there — nothing in `src/` changes.
 
 ## 3. Configuration schema (the flexibility layer)
 
-The entire "which models, which combinations, which judges" question lives in two YAML
-files. `src/` is generic and never names a model.
+The entire "which models, which judges" question lives in `models.yaml`. Pair selection is
+normally generated from CLI flags, while `conditions.yaml` provides optional named presets.
+`src/` is generic and never names a model.
 
 ### `config/models.yaml` — flat registry + judges
 
@@ -93,11 +95,11 @@ judges:
   - claude-opus-4.8
 ```
 
-### `config/conditions.yaml` — explicit combinations
+### `config/conditions.yaml` — optional explicit combinations
 
 ```yaml
-# Each row: who plans, who implements. planner/implementer are keys into models.yaml.
-# No tiers, no auto-expansion. To test a new lineup, just rewrite these rows.
+# Optional named presets. planner/implementer are keys into models.yaml.
+# For full cross-product benchmarking, prefer: duobench run --models kimi-k2.6,gpt-5.5,...
 conditions:
   - { id: kimi-solo,   planner: kimi-k2.6,       implementer: kimi-k2.6 }
   - { id: gpt-solo,    planner: gpt-5.5,         implementer: gpt-5.5 }
@@ -110,9 +112,9 @@ conditions:
 
 ### Reusability
 
-- **Swap a model** (Opus 4.8 → Opus 5): add/edit its entry in `models.yaml`, update the
-  keys in `conditions.yaml`. Fully manual, no aliases.
-- **Test a different lineup** (DeepSeek × MiniMax): add the models, rewrite `conditions`.
+- **Swap a model** (Opus 4.8 → Opus 5): add/edit its entry in `models.yaml`, then use the
+  new key in `--models` or optional `conditions.yaml` presets. Fully manual, no aliases.
+- **Test a different lineup** (DeepSeek × MiniMax): add the models, run `--models deepseek,minimax`.
 - **Validation:** at load, the harness asserts every `planner`/`implementer`/`judges` key
   exists in `models` and fails fast with a clear error otherwise.
 
@@ -128,13 +130,15 @@ checks, computes averages, draws charts. The only agentic work happens *inside* 
 sessions being measured (planner, implementer, judges).
 
 ```
-you → `uv run duobench run --trials 3`
-        └─ for each condition × trial:
-             plan_phase  → spawn Pi RPC (planner model)    → plan.md + cost
-             impl_phase  → spawn FRESH Pi RPC (impl model) → build/  + cost
+you → `uv run duobench run --models kimi,gpt,opus --trials 3`
+        └─ stage 1: for each unique planner × trial:
+             plan_phase  → spawn Pi RPC (planner model)    → shared plan.md + cost
+        └─ stage 2: for each planner×implementer condition × trial:
+             impl_phase  → spawn FRESH Pi RPC (impl model) → build/ + cost
              verify      → Playwright headless             → smoke results + screenshots
-        └─ judge_phase   → judge panel scores every build  → averaged scores
-        └─ charts        → results/*.png
+        └─ stage 3: judge_phase scores every build → averages/charts/report
+
+Planner and build stages use one simple concurrency knob: `--parallel auto|all|N`.
 ```
 
 ### Single uniform substrate: Pi RPC
