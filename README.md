@@ -175,9 +175,9 @@ sessions.
 ## Live CLI
 
 When attached to an interactive terminal, `duobench run` shows a Rich live dashboard with
-current phase, spinner, elapsed time, event/message/tool-call counts, the latest tool call,
-tokens, cache tokens, configured cost, and Pi-reported cost. Use `--no-live` for plain logs or `--live` to force
-it on.
+current phase, active planner/build/judge jobs, elapsed time, condition progress,
+event/message/tool-call counts, the latest tool call, tokens, cache tokens, configured
+cost, and Pi-reported cost. Use `--no-live` for plain logs or `--live` to force it on.
 
 ## Previewing result presentation
 

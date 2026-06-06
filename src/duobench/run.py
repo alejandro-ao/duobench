@@ -66,6 +66,14 @@ class LogOnlyUI:
     def end_phase(self, status: str = "complete") -> None:
         pass
 
+    def start_job(self, job_id: str, kind: str, label: str, status: str = "running") -> None:
+        if hasattr(self._ui, "start_job"):
+            self._ui.start_job(job_id, kind, label, status)
+
+    def finish_job(self, job_id: str, status: str = "complete") -> None:
+        if hasattr(self._ui, "finish_job"):
+            self._ui.finish_job(job_id, status)
+
     def add_turn_result(self, usage, cost_usd: float, reported_usd: float = 0.0) -> None:
         pass
 
@@ -462,9 +470,13 @@ def prepare_shared_plans(
 
     plans: dict[tuple[str, int], SharedPlan] = {}
     phase_ui = _phase_ui(ui, parallel_workers)
-    if parallel_workers <= 1 or len(jobs) <= 1:
-        for _, planner_key, trial, plan_dir in jobs:
-            plans[(planner_key, trial)] = run_shared_plan(
+
+    def run_plan_job(planner_key: str, trial: int, plan_dir: Path) -> SharedPlan:
+        job_id = f"plan:{planner_key}:{trial}"
+        if ui:
+            ui.start_job(job_id, "Planning", f"{planner_key} trial {trial}")
+        try:
+            plan = run_shared_plan(
                 cfg,
                 planner_key,
                 trial,
@@ -476,23 +488,22 @@ def prepare_shared_plans(
                 run_label=run_label,
                 ui=phase_ui,
             )
+            if ui:
+                ui.finish_job(job_id, "complete")
+            return plan
+        except Exception:
+            if ui:
+                ui.finish_job(job_id, "failed")
+            raise
+
+    if parallel_workers <= 1 or len(jobs) <= 1:
+        for _, planner_key, trial, plan_dir in jobs:
+            plans[(planner_key, trial)] = run_plan_job(planner_key, trial, plan_dir)
         return plans
 
     with ThreadPoolExecutor(max_workers=min(parallel_workers, len(jobs))) as pool:
         futures = {
-            pool.submit(
-                run_shared_plan,
-                cfg,
-                planner_key,
-                trial,
-                plan_dir,
-                prompts,
-                dry_run=dry_run,
-                plan_timeout=plan_timeout,
-                save_pi_sessions=save_pi_sessions,
-                run_label=run_label,
-                ui=phase_ui,
-            ): (planner_key, trial)
+            pool.submit(run_plan_job, planner_key, trial, plan_dir): (planner_key, trial)
             for _, planner_key, trial, plan_dir in jobs
         }
         for fut in as_completed(futures):
@@ -652,8 +663,10 @@ def run_condition_trials(
     phase_ui = _phase_ui(ui, parallel_workers)
 
     def run_job(cond: Condition, trial: int, trial_dir: Path) -> tuple[int, TrialRecord, dict]:
+        job_id = f"build:{cond.id}:{trial}"
         if ui:
             ui.start_trial(cond.id, trial, "running")
+            ui.start_job(job_id, "Build+verify", f"{cond.id} trial {trial} impl={cond.implementer}")
         try:
             rec, meta = run_condition_trial(
                 cfg,
@@ -672,10 +685,12 @@ def run_condition_trials(
             )
             if ui:
                 ui.finish_trial(cond.id, trial, "built")
+                ui.finish_job(job_id, "built")
             return rec.trial, rec, meta
         except Exception:
             if ui:
                 ui.finish_trial(cond.id, trial, "failed")
+                ui.finish_job(job_id, "failed")
             raise
 
     results: list[tuple[int, TrialRecord, dict]] = []
@@ -887,7 +902,9 @@ def _main() -> None:
     # --- phase 2: judge panel over every build ---
     ui.log("judging...")
     for rec, meta in zip(records, metas):
+        judge_job_id = f"judge:{rec.condition_id}:{rec.trial}"
         ui.start_trial(rec.condition_id, rec.trial, "judging")
+        ui.start_job(judge_job_id, "Judging", f"{rec.condition_id} trial {rec.trial} ({len(cfg.judges)} judges)")
         if args.dry_run:
             scores = _dry_run_judge_scores(cfg, rec)
             rec.per_judge = {
@@ -908,6 +925,7 @@ def _main() -> None:
                 indent=2, default=str,
             ))
             ui.finish_trial(rec.condition_id, rec.trial, "done")
+            ui.finish_job(judge_job_id, "done")
             continue
         trial_dir = Path(meta["build_dir"]).parent
         scores = judge_panel(
@@ -935,6 +953,7 @@ def _main() -> None:
             indent=2, default=str,
         ))
         ui.finish_trial(rec.condition_id, rec.trial, "done")
+        ui.finish_job(judge_job_id, "done")
 
     # --- phase 3: aggregate + charts ---
     results = aggregate(records, cfg.judges)

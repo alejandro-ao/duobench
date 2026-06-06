@@ -13,6 +13,14 @@ from duobench.pi_rpc import Usage
 
 
 @dataclass
+class ActiveJob:
+    kind: str
+    label: str
+    started_at: float = field(default_factory=time.time)
+    status: str = "running"
+
+
+@dataclass
 class PhaseMetrics:
     name: str = "idle"
     model: str = ""
@@ -45,6 +53,12 @@ class NullUI:
         pass
 
     def finish_trial(self, condition_id: str, trial: int, status: str = "built") -> None:
+        pass
+
+    def start_job(self, job_id: str, kind: str, label: str, status: str = "running") -> None:
+        pass
+
+    def finish_job(self, job_id: str, status: str = "complete") -> None:
         pass
 
     def start_phase(self, name: str, model: str = "") -> None:
@@ -88,6 +102,8 @@ class RichUI(NullUI):
         self.current_condition = ""
         self.current_trial: int | None = None
         self.trial_status: dict[tuple[str, int], str] = {}
+        self.active_jobs: dict[str, ActiveJob] = {}
+        self.completed_job_count = 0
 
     def start_run(self, *, run_dir: Path, conditions: list, trials: int, dry_run: bool) -> None:
         self.run_dir = run_dir
@@ -100,6 +116,8 @@ class RichUI(NullUI):
             for c in conditions
             for trial in range(trials)
         }
+        self.active_jobs = {}
+        self.completed_job_count = 0
         self._live = self._Live(self._render(), console=self.console, refresh_per_second=8, transient=False)
         self._running = True
         self._live.start()
@@ -123,16 +141,33 @@ class RichUI(NullUI):
             print(message, flush=True)
 
     def start_trial(self, condition_id: str, trial: int, status: str = "running") -> None:
-        self.current_condition = condition_id
-        self.current_trial = trial
-        self.trial_status[(condition_id, trial)] = status
+        with self._lock:
+            self.current_condition = condition_id
+            self.current_trial = trial
+            self.trial_status[(condition_id, trial)] = status
         self._refresh()
 
     def finish_trial(self, condition_id: str, trial: int, status: str = "built") -> None:
-        self.trial_status[(condition_id, trial)] = status
-        if self.current_condition == condition_id and self.current_trial == trial:
-            self.current_condition = ""
-            self.current_trial = None
+        with self._lock:
+            self.trial_status[(condition_id, trial)] = status
+            if self.current_condition == condition_id and self.current_trial == trial:
+                self.current_condition = ""
+                self.current_trial = None
+        self._refresh()
+
+    def start_job(self, job_id: str, kind: str, label: str, status: str = "running") -> None:
+        with self._lock:
+            self.active_jobs[job_id] = ActiveJob(kind=kind, label=label, status=status)
+        self._refresh()
+
+    def finish_job(self, job_id: str, status: str = "complete") -> None:
+        with self._lock:
+            job = self.active_jobs.pop(job_id, None)
+            if job:
+                elapsed = time.time() - job.started_at
+                color = "red" if status == "failed" else "green"
+                self.completed.append(f"[{color}]✓[/{color}] {job.kind} {job.label} {status} in {elapsed:.1f}s")
+                self.completed_job_count += 1
         self._refresh()
 
     def start_phase(self, name: str, model: str = "") -> None:
@@ -208,6 +243,8 @@ class RichUI(NullUI):
         header.add_row("conditions", conds)
         header.add_row("trials", str(self.trials))
         header.add_row("elapsed", _fmt_duration(elapsed))
+        header.add_row("active jobs", str(len(self.active_jobs)))
+        header.add_row("completed jobs", str(self.completed_job_count))
         if self.current_condition:
             header.add_row("current", f"[bold yellow]{self.current_condition}[/bold yellow] trial {self.current_trial}")
 
@@ -236,6 +273,20 @@ class RichUI(NullUI):
         if self.phase.last_tool_at:
             last_tool = f"{last_tool} ({_fmt_duration(time.time() - self.phase.last_tool_at)} ago)"
         metrics.add_row("last tool call", last_tool)
+
+        active = Table(box=box.SIMPLE_HEAVY, expand=True)
+        active.add_column("kind", style="cyan")
+        active.add_column("job")
+        active.add_column("elapsed", justify="right")
+        active.add_column("status")
+        active_jobs = sorted(self.active_jobs.values(), key=lambda j: j.started_at)
+        if active_jobs:
+            for job in active_jobs[:8]:
+                active.add_row(job.kind, job.label, _fmt_duration(time.time() - job.started_at), job.status)
+            if len(active_jobs) > 8:
+                active.add_row("…", f"{len(active_jobs) - 8} more active job(s)", "", "")
+        else:
+            active.add_row("—", "No active jobs", "", "")
 
         progress = Table(box=box.SIMPLE_HEAVY, expand=True)
         progress.add_column("condition")
@@ -268,6 +319,7 @@ class RichUI(NullUI):
             Columns([
                 Panel(header, title="Run", border_style="cyan"),
                 Panel(progress, title="Condition progress", border_style="yellow"),
+                Panel(active, title="Active jobs", border_style="bright_magenta"),
                 Panel(spin, title="Current phase", border_style="magenta"),
                 Panel(metrics, title="Live counters", border_style="green"),
                 Panel(done, title="Completed phases", border_style="blue"),
