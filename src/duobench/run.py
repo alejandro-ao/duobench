@@ -215,6 +215,7 @@ def _main() -> None:
         for trial in range(args.trials):
             trial_dir = cond_root / cond.id / f"trial-{trial}"
             trial_dir.mkdir(parents=True, exist_ok=True)
+            ui.start_trial(cond.id, trial, "running")
             rec, meta = run_condition_trial(
                 cfg, cond, trial, trial_dir, prompts,
                 dry_run=args.dry_run,
@@ -222,12 +223,14 @@ def _main() -> None:
                 judge_timeout=args.judge_timeout,
                 ui=ui,
             )
+            ui.finish_trial(cond.id, trial, "built")
             records.append(rec)
             metas.append(meta)
 
     # --- phase 2: judge panel over every build ---
     ui.log("judging...")
     for rec, meta in zip(records, metas):
+        ui.start_trial(rec.condition_id, rec.trial, "judging")
         if args.dry_run:
             # canned scores so the wiring runs without real judges
             for jk in cfg.judges:
@@ -239,6 +242,7 @@ def _main() -> None:
                 {"benchmark": existing_trial.get("benchmark"), "record": rec.__dict__, "meta": meta, "judge_scores": []},
                 indent=2, default=str,
             ))
+            ui.finish_trial(rec.condition_id, rec.trial, "done")
             continue
         trial_dir = Path(meta["build_dir"]).parent
         scores = judge_panel(
@@ -262,6 +266,7 @@ def _main() -> None:
             },
             indent=2, default=str,
         ))
+        ui.finish_trial(rec.condition_id, rec.trial, "done")
 
     # --- phase 3: aggregate + charts ---
     results = aggregate(records, cfg.judges)

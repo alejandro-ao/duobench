@@ -41,6 +41,12 @@ class NullUI:
     def stop(self) -> None:
         pass
 
+    def start_trial(self, condition_id: str, trial: int, status: str = "running") -> None:
+        pass
+
+    def finish_trial(self, condition_id: str, trial: int, status: str = "built") -> None:
+        pass
+
     def start_phase(self, name: str, model: str = "") -> None:
         pass
 
@@ -80,6 +86,8 @@ class RichUI(NullUI):
         self.phase = PhaseMetrics()
         self.completed: list[str] = []
         self.current_condition = ""
+        self.current_trial: int | None = None
+        self.trial_status: dict[tuple[str, int], str] = {}
 
     def start_run(self, *, run_dir: Path, conditions: list, trials: int, dry_run: bool) -> None:
         self.run_dir = run_dir
@@ -87,6 +95,11 @@ class RichUI(NullUI):
         self.trials = trials
         self.dry_run = dry_run
         self.run_started_at = time.time()
+        self.trial_status = {
+            (getattr(c, "id", str(c)), trial): "pending"
+            for c in conditions
+            for trial in range(trials)
+        }
         self._live = self._Live(self._render(), console=self.console, refresh_per_second=8, transient=False)
         self._running = True
         self._live.start()
@@ -108,6 +121,19 @@ class RichUI(NullUI):
             self.console.log(message)
         else:
             print(message, flush=True)
+
+    def start_trial(self, condition_id: str, trial: int, status: str = "running") -> None:
+        self.current_condition = condition_id
+        self.current_trial = trial
+        self.trial_status[(condition_id, trial)] = status
+        self._refresh()
+
+    def finish_trial(self, condition_id: str, trial: int, status: str = "built") -> None:
+        self.trial_status[(condition_id, trial)] = status
+        if self.current_condition == condition_id and self.current_trial == trial:
+            self.current_condition = ""
+            self.current_trial = None
+        self._refresh()
 
     def start_phase(self, name: str, model: str = "") -> None:
         self.phase = PhaseMetrics(name=name, model=model)
@@ -182,9 +208,14 @@ class RichUI(NullUI):
         header.add_row("conditions", conds)
         header.add_row("trials", str(self.trials))
         header.add_row("elapsed", _fmt_duration(elapsed))
+        if self.current_condition:
+            header.add_row("current", f"[bold yellow]{self.current_condition}[/bold yellow] trial {self.current_trial}")
 
         phase_elapsed = time.time() - self.phase.started_at
-        spin = Spinner("dots", text=f"[bold]{self.phase.name}[/bold] {self.phase.model} ({_fmt_duration(phase_elapsed)})")
+        phase_text = f"[bold]{self.phase.name}[/bold] {self.phase.model} ({_fmt_duration(phase_elapsed)})"
+        if self.current_condition:
+            phase_text = f"[bold yellow]{self.current_condition}[/bold yellow] trial {self.current_trial} · " + phase_text
+        spin = Spinner("dots", text=phase_text)
 
         metrics = Table(box=box.SIMPLE_HEAVY, expand=True)
         metrics.add_column("metric", style="dim")
@@ -206,13 +237,40 @@ class RichUI(NullUI):
             last_tool = f"{last_tool} ({_fmt_duration(time.time() - self.phase.last_tool_at)} ago)"
         metrics.add_row("last tool call", last_tool)
 
+        progress = Table(box=box.SIMPLE_HEAVY, expand=True)
+        progress.add_column("condition")
+        progress.add_column("trial", justify="right")
+        progress.add_column("status")
+        for cond in self.conditions:
+            cid = getattr(cond, "id", str(cond))
+            for trial in range(self.trials):
+                status = self.trial_status.get((cid, trial), "pending")
+                style = {
+                    "pending": "dim",
+                    "running": "yellow",
+                    "built": "cyan",
+                    "judging": "magenta",
+                    "done": "green",
+                    "failed": "red",
+                }.get(status, "")
+                marker = {
+                    "pending": "○",
+                    "running": "▶",
+                    "built": "◐",
+                    "judging": "◆",
+                    "done": "✓",
+                    "failed": "✗",
+                }.get(status, "•")
+                progress.add_row(cid, str(trial), f"[{style}]{marker} {status}[/{style}]" if style else f"{marker} {status}")
+
         done = Text.from_markup("\n".join(self.completed[-8:]) or "[dim]No completed phases yet.[/dim]")
         return Panel.fit(
             Columns([
                 Panel(header, title="Run", border_style="cyan"),
+                Panel(progress, title="Condition progress", border_style="yellow"),
                 Panel(spin, title="Current phase", border_style="magenta"),
                 Panel(metrics, title="Live counters", border_style="green"),
-                Panel(done, title="Completed", border_style="blue"),
+                Panel(done, title="Completed phases", border_style="blue"),
             ], equal=True, expand=True),
             title="[bold]Benchmark dashboard[/bold]",
             border_style="bright_blue",
