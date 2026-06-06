@@ -5,10 +5,12 @@ models:
   kimi-k2.6:
     provider: kimi-coding       # verified working in Pi RPC set_model
     model_id: kimi-for-coding
+    thinking: high              # Pi RPC set_thinking_level high
     pricing: { input: 0.95, output: 4.00 }
   gpt-5.5:
     provider: openai-codex      # verified working in Pi RPC set_model
     model_id: gpt-5.5
+    thinking: off               # Pi RPC set_thinking_level off
     pricing: { input: 5.00, output: 30.00 }
   claude-opus-4.8:
     # PLACEHOLDER: Anthropic is not yet registered in this Pi install.

@@ -23,6 +23,7 @@ def run_plan_phase(
     *,
     timeout: float = 600.0,
     pin_temperature: bool = False,
+    thinking_level: str | None = None,
     ui=None,
 ) -> tuple[str, PhaseCost]:
     """Run the planner; write plan.md to out_dir. Returns (plan_text, cost)."""
@@ -37,7 +38,9 @@ def run_plan_phase(
         raw_events_path=out_dir / "planner-events.jsonl",
     ) as s:
         s.set_model(planner.provider, planner.model_id)
-        if pin_temperature:
+        if thinking_level is not None:
+            s.set_thinking(thinking_level)
+        elif pin_temperature:
             s.set_thinking("off")
         started = time.time()
         result = s.prompt(architect_prompt, timeout=timeout)

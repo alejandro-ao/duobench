@@ -54,6 +54,7 @@ def run_impl_phase(
     *,
     timeout: float = 1800.0,
     pin_temperature: bool = False,
+    thinking_level: str | None = None,
     ui=None,
 ) -> ImplResult:
     """Build the WebOS into build_dir. Accumulates usage across the multi-turn loop."""
@@ -82,7 +83,9 @@ def run_impl_phase(
         raw_events_path=build_dir.parent / "implementer-events.jsonl",
     ) as s:
         s.set_model(implementer.provider, implementer.model_id)
-        if pin_temperature:
+        if thinking_level is not None:
+            s.set_thinking(thinking_level)
+        elif pin_temperature:
             s.set_thinking("off")
         try:
             started = time.time()

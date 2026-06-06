@@ -229,12 +229,12 @@ class PiSession:
             )
 
     def set_thinking(self, level: str, *, timeout: float = 10.0) -> None:
-        """Best-effort thinking/temperature control. Ignored if unsupported."""
-        self._send({"type": "set_thinking", "level": level})
+        """Best-effort thinking/reasoning control. Ignored if unsupported."""
+        self._send({"type": "set_thinking_level", "level": level})
         try:
-            self._await_response("set_thinking", timeout=timeout)
+            self._await_response("set_thinking_level", timeout=timeout)
         except PiRpcError:
-            pass  # not all builds support it; non-fatal
+            pass  # not all models/providers support it; non-fatal
 
     def prompt(self, message: str, *, timeout: float) -> TurnResult:
         self._send({"type": "prompt", "message": message})

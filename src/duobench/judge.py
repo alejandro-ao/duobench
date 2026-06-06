@@ -141,7 +141,10 @@ def judge_build(
         raw_events_path=raw_events_path,
     ) as s:
         s.set_model(judge_model.provider, judge_model.model_id)
-        s.set_thinking("off")  # determinism best-effort
+        if judge_model.thinking_level is not None:
+            s.set_thinking(judge_model.thinking_level)
+        else:
+            s.set_thinking("off")  # determinism best-effort fallback
         try:
             # Try with images first; fall back to text-only if the build/model rejects it.
             try:

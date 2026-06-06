@@ -405,6 +405,7 @@ def run_shared_plan(
             plan_dir,
             timeout=plan_timeout,
             pin_temperature=True,
+            thinking_level=planner.thinking_level,
             ui=ui,
         )
         plan_cost = pc.usd
@@ -544,7 +545,8 @@ def run_condition_trial(
         impl_status = "complete"
     else:
         impl = run_impl_phase(implementer, prompts["implement"], plan_text, build_dir,
-                              timeout=impl_timeout, pin_temperature=True, ui=ui)
+                              timeout=impl_timeout, pin_temperature=True,
+                              thinking_level=implementer.thinking_level, ui=ui)
         impl_cost = impl.cost.usd
         impl_status = impl.status
 
@@ -803,7 +805,12 @@ def _main() -> None:
     ui.log(f"phase plan: {plan_jobs} shared planner run(s) → build: {impl_jobs} implementation run(s) → judge: {judge_jobs} judge run(s)")
     ui.log("conditions:")
     for c in conditions:
-        ui.log(f"  - {c.id}: planner={c.planner} implementer={c.implementer}")
+        planner_thinking = cfg.model(c.planner).thinking_level or "default/off"
+        implementer_thinking = cfg.model(c.implementer).thinking_level or "default/off"
+        ui.log(
+            f"  - {c.id}: planner={c.planner} (thinking={planner_thinking}) "
+            f"implementer={c.implementer} (thinking={implementer_thinking})"
+        )
     if not args.dry_run:
         ui.log("\nTip: if this is your first run, `duobench run --dry-run` validates the pipeline without API spend.")
     ui.log("")

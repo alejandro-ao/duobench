@@ -45,6 +45,7 @@ def _model_payload(model: Model) -> dict[str, Any]:
         "key": model.key,
         "provider": model.provider,
         "model_id": model.model_id,
+        "thinking_level": model.thinking_level,
     }
 
 

@@ -78,10 +78,12 @@ models:
   kimi-k2.6:
     provider: kimi
     model_id: kimi-k2.6
+    thinking: high                              # Pi level: off|minimal|low|medium|high|xhigh
     pricing: { input: 0.95, output: 4.00 }     # $/MTok
   gpt-5.5:
     provider: openai
     model_id: gpt-5.5
+    thinking: off
     pricing: { input: 5.00, output: 30.00 }
   claude-opus-4.8:
     provider: anthropic
@@ -144,11 +146,13 @@ Planner and build stages use one simple concurrency knob: `--parallel auto|all|N
 ### Single uniform substrate: Pi RPC
 
 Every model runs through **Pi RPC** (`pi --mode rpc`), a JSONL subprocess protocol over
-stdin/stdout. Switching models is just a `set_model` command (provider + model_id come
-straight from `models.yaml`):
+stdin/stdout. Switching models is a `set_model` command (provider + model_id come straight from
+`models.yaml`). If a model defines `thinking`, duobench immediately sends Pi RPC
+`set_thinking_level` before prompting:
 
 ```json
 {"type": "set_model", "provider": "anthropic", "modelId": "claude-opus-4-8"}
+{"type": "set_thinking_level", "level": "high"}
 {"type": "prompt", "message": "..."}
 ```
 

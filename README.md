@@ -144,10 +144,12 @@ models:
   kimi-k2.6:
     provider: kimi-coding        # Pi provider id
     model_id: kimi-for-coding    # Pi model id
+    thinking: high               # optional Pi thinking level: off|minimal|low|medium|high|xhigh
     pricing: { input: 0.95, output: 4.00 }   # $/MTok; optional cache_read/cache_write supported
   gpt-5.5:
     provider: openai-codex
     model_id: gpt-5.5
+    thinking: off
     pricing: { input: 5.00, output: 30.00 }
 judges:
   - kimi-k2.6
@@ -165,7 +167,9 @@ conditions:
 To benchmark a different lineup (e.g. DeepSeek × MiniMax), add the models to
 `models.yaml`, then run `duobench run --models deepseek,minimax,...`. Config is validated
 up front: any planner/implementer/judge that isn't a registered model key fails fast before
-any model is called.
+any model is called. If `thinking` is set, duobench sends Pi RPC
+`set_thinking_level` immediately after `set_model` for planner, implementer, and judge
+sessions.
 
 ## Live CLI
 

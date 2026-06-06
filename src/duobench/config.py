@@ -27,6 +27,7 @@ class Model:
     provider: str
     model_id: str
     pricing: Pricing
+    thinking_level: str | None = None
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,9 @@ class Config:
 
     def model(self, key: str) -> Model:
         return self.models[key]
+
+
+THINKING_LEVELS = {"off", "minimal", "low", "medium", "high", "xhigh"}
 
 
 def _require(cond: bool, msg: str) -> None:
@@ -87,6 +91,17 @@ def load_config(
             isinstance(pricing, dict) and "input" in pricing and "output" in pricing,
             f"model '{key}': pricing must have 'input' and 'output'",
         )
+        thinking_level = spec["thinking"] if "thinking" in spec else spec.get("thinking_level")
+        if isinstance(thinking_level, bool):
+            # YAML 1.1 parses unquoted `off` as False. Accept it because it is a
+            # natural way to write Pi's thinking level in YAML.
+            thinking_level = "off" if thinking_level is False else "on"
+        if thinking_level is not None:
+            thinking_level = str(thinking_level)
+            _require(
+                thinking_level in THINKING_LEVELS,
+                f"model '{key}': thinking must be one of {', '.join(sorted(THINKING_LEVELS))}",
+            )
         models[key] = Model(
             key=key,
             provider=str(spec["provider"]),
@@ -97,6 +112,7 @@ def load_config(
                 cache_read=float(pricing["cache_read"]) if "cache_read" in pricing else None,
                 cache_write=float(pricing["cache_write"]) if "cache_write" in pricing else None,
             ),
+            thinking_level=thinking_level,
         )
 
     # --- judges ---

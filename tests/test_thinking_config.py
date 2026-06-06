@@ -1,0 +1,64 @@
+import io
+
+from duobench.config import Config, Model, Pricing, load_config
+from duobench.cost import PhaseCost
+from duobench.pi_rpc import PiSession
+from duobench.run import run_shared_plan
+
+
+class _FakeProc:
+    def __init__(self):
+        self.stdin = io.StringIO()
+
+    def poll(self):
+        return None
+
+
+def test_packaged_default_thinking_levels(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    cfg = load_config()
+
+    assert cfg.model("kimi-k2.6").thinking_level == "high"
+    assert cfg.model("gpt-5.5").thinking_level == "off"
+
+
+def test_pi_session_sends_rpc_set_thinking_level_command():
+    session = PiSession(cwd=".")
+    fake_proc = _FakeProc()
+    session._proc = fake_proc
+    session._events.put({"type": "response", "command": "set_thinking_level", "success": True})
+
+    session.set_thinking("high")
+
+    assert fake_proc.stdin.getvalue() == '{"type": "set_thinking_level", "level": "high"}\n'
+
+
+def test_shared_plan_passes_configured_thinking_level_to_plan_phase(tmp_path, monkeypatch):
+    import duobench.run as run_mod
+
+    cfg = Config(
+        models={"kimi": Model("kimi", "kimi-provider", "kimi-model", Pricing(1, 2), thinking_level="high")},
+        judges=["kimi"],
+        conditions=[],
+    )
+    captured = {}
+
+    def fake_run_plan_phase(planner, architect_prompt, out_dir, **kwargs):
+        captured["thinking_level"] = kwargs["thinking_level"]
+        (out_dir / "plan.md").write_text("plan")
+        return "plan", PhaseCost(1, 1, 0, 0, 0.01)
+
+    monkeypatch.setattr(run_mod, "run_plan_phase", fake_run_plan_phase)
+
+    run_shared_plan(
+        cfg,
+        "kimi",
+        0,
+        tmp_path,
+        {"architect": "prompt"},
+        dry_run=False,
+        plan_timeout=600,
+    )
+
+    assert captured["thinking_level"] == "high"
