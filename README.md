@@ -20,6 +20,38 @@ uv run playwright install chromium
 Requires the `pi` binary on PATH (`pi --mode rpc`) with the providers you reference in
 config already registered.
 
+## Quick start for a cloud agent
+
+If you are handing this repo to an agent or remote runner, tell it to run **one condition
+first** and return the generated `report.html`.
+
+```bash
+# 1. Install deps
+uv sync
+uv run playwright install chromium
+
+# 2. Validate local wiring without API/model spend
+uv run kcbench run --dry-run --conditions gpt-x-kimi --trials 1 --no-live
+
+# 3. Run one real GPT-planner × Kimi-implementer trial
+uv run kcbench run \
+  --conditions gpt-x-kimi \
+  --trials 1 \
+  --no-live \
+  --plan-timeout 600 \
+  --impl-timeout 1800 \
+  --judge-timeout 300
+```
+
+Expected final artifact:
+
+```bash
+open runs/<timestamp>/report.html
+```
+
+For a copy/paste prompt you can give to a cloud coding agent, see
+[`AGENT_RUN_PROMPT.md`](AGENT_RUN_PROMPT.md).
+
 ## Run
 
 ```bash
@@ -47,6 +79,31 @@ uv run kcbench run --trials 3
 | `--impl-timeout` | `1800` | Implementer wall-clock (s) |
 | `--judge-timeout` | `300` | Per-judge wall-clock (s) |
 | `--live` / `--no-live` | auto | Force-enable/disable the Rich live dashboard |
+
+## Running in tmux / long-running environments
+
+Real runs can take a while. For a remote machine, prefer `tmux` and plain logs:
+
+```bash
+tmux new-session -d -s kcbench \
+  'cd /path/to/agent-synergy-eval && \
+   PYTHONUNBUFFERED=1 uv run kcbench run \
+     --conditions gpt-x-kimi \
+     --trials 1 \
+     --no-live \
+     --plan-timeout 600 \
+     --impl-timeout 1800 \
+     --judge-timeout 300 \
+     2>&1 | tee /tmp/kcbench.log'
+```
+
+Monitor:
+
+```bash
+tmux attach -t kcbench
+# detach safely with Ctrl-b, then d
+tail -f /tmp/kcbench.log
+```
 
 ## Configuration
 
