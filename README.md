@@ -19,7 +19,14 @@ uv sync
 uv run playwright install chromium
 ```
 
-As a standalone uv tool:
+As a standalone uv tool from PyPI:
+
+```bash
+uv tool install duobench
+uvx playwright install chromium
+```
+
+Or directly from GitHub before a PyPI release:
 
 ```bash
 uv tool install git+https://github.com/alejandro-ao/agent-synergy-eval.git

@@ -4,6 +4,20 @@ version = "0.1.0"
 description = "Cost-efficiency benchmark for planner-implementer LLM duos via Pi RPC"
 readme = "README.md"
 requires-python = ">=3.11"
+authors = [
+    { name = "Alejandro AO" },
+]
+keywords = ["llm", "benchmark", "agents", "cost", "evaluation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+]
 dependencies = [
     "pyyaml>=6.0",
     "playwright>=1.49",
@@ -11,6 +25,11 @@ dependencies = [
     "pillow>=11.0",
     "rich>=13.9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/alejandro-ao/agent-synergy-eval"
+Repository = "https://github.com/alejandro-ao/agent-synergy-eval"
+Issues = "https://github.com/alejandro-ao/agent-synergy-eval/issues"
 
 [project.scripts]
 duobench = "duobench.run:main"
