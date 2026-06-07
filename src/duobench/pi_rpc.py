@@ -108,6 +108,7 @@ class PiSession:
         cwd: str | Path,
         *,
         enable_tools: bool = False,
+        allowed_tools: list[str] | None = None,
         startup_timeout: float = 30.0,
         pi_bin: str = "pi",
         extra_args: list[str] | None = None,
@@ -118,6 +119,7 @@ class PiSession:
     ) -> None:
         self.cwd = str(cwd)
         self.enable_tools = enable_tools
+        self.allowed_tools = allowed_tools
         self.startup_timeout = startup_timeout
         self.pi_bin = pi_bin
         self.extra_args = extra_args or []
@@ -143,7 +145,9 @@ class PiSession:
             args.append("--no-session")
         if self.session_name:
             args += ["--name", self.session_name]
-        if not self.enable_tools:
+        if self.allowed_tools is not None:
+            args += ["--tools", ",".join(self.allowed_tools)]
+        elif not self.enable_tools:
             args.append("--no-tools")
         args += self.extra_args
         env = os.environ.copy()

@@ -1,13 +1,13 @@
-"""Implementation phase: a fresh implementer session builds the WebOS from the plan.
+"""Implementation phase: a fresh implementer session completes the task from the plan.
 
-The implementer never sees the planner's reasoning — only the plan text injected into the
-prompt. Tools are enabled and the session CWD is the build dir, so the agent writes files
-there directly.
+The implementer never sees the planner's reasoning — only the user task and plan text.
+Tools are enabled and the session CWD is the build dir, so the agent writes files there
+directly.
 
 No hard turn cap (per design): realistic looping behavior naturally inflates cost. The only
 guardrail is a wall-clock timeout; a build that hits it is recorded as a `timeout`
 failure-mode data point rather than crashing the suite. A bounded multi-turn loop nudges
-the agent to keep building until it signals completion.
+the agent to keep working until it signals completion.
 """
 
 from __future__ import annotations
@@ -22,12 +22,14 @@ from duobench.pi_rpc import PiRpcError, PiSession, Usage
 from duobench.transcript import new_transcript
 
 # Heuristic completion markers the implementer is asked to emit when done.
-_DONE_MARKERS = ("build is complete", "build complete", "fully functional", "done building",
-                 "implementation is complete", "completed the build")
+_DONE_MARKERS = (
+    "task complete", "implementation complete", "implementation is complete",
+    "build complete", "build is complete"
+)
 _CONTINUE_MSG = (
-    "Continue building. If anything from the plan is missing or incomplete (apps, games, "
-    "window manager, persistence, theming), implement it now. When the entire WebOS is "
-    "complete and functional with index.html at the root, reply with exactly: BUILD COMPLETE"
+    "Continue working on the task. If anything from the user request or plan is missing or "
+    "incomplete, implement it now and run appropriate checks if possible. When everything is "
+    "complete, reply with exactly: TASK COMPLETE"
 )
 _MAX_FOLLOW_UPS = 12  # safety bound on the nudge loop, not a per-agent turn cap
 
@@ -59,7 +61,7 @@ def run_impl_phase(
     session_name: str | None = None,
     ui=None,
 ) -> ImplResult:
-    """Build the WebOS into build_dir. Accumulates usage across the multi-turn loop."""
+    """Complete the task in build_dir. Accumulates usage across the multi-turn loop."""
     build_dir.mkdir(parents=True, exist_ok=True)
     prompt = implement_prompt_template.replace("{plan}", plan_text)
 
@@ -136,8 +138,8 @@ def run_impl_phase(
             session_state = {}
 
     # If nothing was written, flag it (correctness will score it via verify anyway).
-    if not (build_dir / "index.html").exists():
-        notes.append("no index.html at build root after implementation")
+    if not any(build_dir.iterdir()):
+        notes.append("no files written in build directory after implementation")
 
     transcript.status = status
     transcript.notes = notes

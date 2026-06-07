@@ -2,11 +2,9 @@
 
 Cost-efficiency benchmark for **planner × implementer** LLM duos, run over Pi RPC.
 
-Each condition spawns a fresh *planner* session to design a small MiniDesk browser app,
-hands the plan text (only the plan — not the planner's reasoning) to a fresh
-*implementer* session that builds it, then a judge panel scores the result. Cost is captured per phase, including cached-token usage when Pi reports it; charts show the
-cost/quality trade-off. Nothing about "challenger vs flagship" is baked in — you measure
-whatever combinations you list in config.
+Duobench takes one realistic user task prompt, runs each planner model to explore the local repository and produce a handoff plan, then runs every planner × implementer pairing against that plan. A judge panel scores each result. Cost is captured per phase, including cached-token usage when Pi reports it; charts show the cost/quality trade-off. Nothing about "challenger vs flagship" is baked in — you measure whatever combinations you list in config.
+
+By default, the user task is a small MiniDesk browser-app benchmark. Override it with `--prompt` or `--prompt-file`.
 
 See `DESIGN.md` for the full design rationale.
 
@@ -77,6 +75,9 @@ uv run duobench run --dry-run --models kimi-k2.6,gpt-5.5 --trials 1
 # simplest real benchmark: every model plans once, then every planner×implementer pair builds
 uv run duobench run --models kimi-k2.6,gpt-5.5,claude-opus-4.8 --trials 1
 
+# shorthand form with a realistic task prompt
+uv run duobench --prompt 'fix the issue described here: ...paste issue text...' --models kimi-k2.6,gpt-5.5 --trials 1
+
 # rectangular matrix: only these planners crossed with only these implementers
 uv run duobench run --planners kimi-k2.6,gpt-5.5 --implementers kimi-k2.6 --trials 1
 
@@ -92,6 +93,8 @@ uv run duobench run --trials 3
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--trials N` | `1` | Trials per condition (variance / error bars) |
+| `--prompt TEXT` | MiniDesk task | User task prompt given to each planner |
+| `--prompt-file PATH` | off | Read the user task prompt from a file |
 | `--conditions a,b,c` | all from config | Comma-separated condition ids to run from `conditions.yaml` |
 | `--models a,b,c` | off | Generate a full planner×implementer matrix from model keys (N plans, N² builds per trial) |
 | `--planners a,b` | off | Planner keys for a rectangular matrix; use with `--implementers` |
@@ -224,7 +227,10 @@ Within a run, execution is deliberately two-stage and simple: all unique planner
 run first, keyed by `(planner, trial)`, then all planner×implementer builds run from those
 plans. For `--models a,b,c --trials 1`, that means 3 planner runs followed by 9
 implementation/verification runs. Condition-level cost still includes the copied planner
-cost for fair comparisons.
+cost for fair comparisons. Planner agents get local read-only Pi tools (`read`, `grep`,
+`find`, `ls`, `bash`) so they can explore the repository, but no web access is bundled.
+If your prompt references a GitHub issue URL, paste the issue text or provide it through
+`--prompt-file` for now.
 
 Planner jobs and condition build/verify jobs run with bounded concurrency by default
 (`--parallel auto`, currently up to 2 workers). Use `--parallel all` to launch every job in

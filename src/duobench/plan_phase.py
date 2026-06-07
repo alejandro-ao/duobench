@@ -1,8 +1,8 @@
 """Plan phase: a planner model produces an architecture plan from the architect prompt.
 
-Session-isolated from implementation. The plan text is the only handoff artifact (mirrors
-the production flow: plan → GitHub issue → fresh implementer). No tools needed — the
-planner just writes a plan.
+Session-isolated from implementation. The plan text is the only handoff artifact. The
+planner may inspect the local repository with read-only Pi tools, but it must not edit
+files.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ def run_plan_phase(
     architect_prompt: str,
     out_dir: Path,
     *,
+    workspace_dir: Path | None = None,
     timeout: float = 600.0,
     pin_temperature: bool = False,
     thinking_level: str | None = None,
@@ -34,8 +35,9 @@ def run_plan_phase(
     if ui:
         ui.start_phase("Planning", planner.key)
     with PiSession(
-        cwd=out_dir,
-        enable_tools=False,
+        cwd=workspace_dir or out_dir,
+        enable_tools=True,
+        allowed_tools=["read", "grep", "find", "ls", "bash"],
         event_callback=getattr(ui, "on_rpc_event", None),
         raw_events_path=out_dir / "planner-events.jsonl",
         persist_session=persist_pi_session,

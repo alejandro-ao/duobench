@@ -16,4 +16,4 @@ def test_load_prompt_falls_back_to_packaged_defaults(tmp_path, monkeypatch):
 
     prompt = _load_prompt("architect.md")
 
-    assert "MiniDesk" in prompt
+    assert "{user_prompt}" in prompt

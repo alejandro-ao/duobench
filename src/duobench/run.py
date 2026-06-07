@@ -37,6 +37,7 @@ from duobench.ui import make_ui
 
 AUTO_PARALLEL_WORKERS = 2
 ALL_PARALLEL_WORKERS = 10_000
+DEFAULT_USER_PROMPT = """Build MiniDesk, a small desktop-like browser app that runs directly from index.html using vanilla HTML, CSS, and JavaScript. It should include a desktop area, a bottom taskbar with a clock, and exactly three launchable apps: Notes with localStorage persistence, Calculator with basic arithmetic, and Todo with add/complete/delete plus localStorage persistence. Use no frameworks, build step, CDNs, external assets, or ES modules. Keep the implementation small and robust."""
 
 
 @dataclass(frozen=True)
@@ -87,6 +88,31 @@ def _load_prompt(name: str) -> str:
     if local.is_file():
         return local.read_text()
     return (resources.files("duobench.defaults.prompts") / name).read_text()
+
+
+def _load_user_prompt(prompt: str, prompt_file: str) -> str:
+    if prompt and prompt_file:
+        raise ConfigError("use either --prompt or --prompt-file, not both")
+    if prompt_file:
+        path = Path(prompt_file)
+        if not path.is_file():
+            raise ConfigError(f"--prompt-file not found: {path}")
+        text = path.read_text().strip()
+    else:
+        text = prompt.strip()
+    return text or DEFAULT_USER_PROMPT
+
+
+def _user_prompt_from(prompts: dict[str, str]) -> str:
+    return prompts.get("user_prompt", DEFAULT_USER_PROMPT)
+
+
+def _format_prompt_template(template: str, **values: str) -> str:
+    try:
+        return template.format(**values)
+    except KeyError as e:
+        missing = e.args[0]
+        raise ConfigError(f"prompt template references unknown placeholder {{{missing}}}") from e
 
 
 def _stable_int(key: str, low: int, high: int) -> int:
@@ -237,6 +263,13 @@ def _stub_build(build_dir: Path, *, title: str = "Dry-run MiniDesk", accent: str
 </body>
 </html>"""
     )
+
+
+def _normalize_argv(argv: list[str]) -> list[str]:
+    """Allow `duobench --prompt ...` as shorthand for `duobench run --prompt ...`."""
+    if argv and argv[0] not in {"run", "report", "-h", "--help"}:
+        return ["run", *argv]
+    return argv
 
 
 def _parse_csv(value: str | None) -> list[str]:
@@ -394,6 +427,7 @@ def run_shared_plan(
     plan_timeout: float,
     save_pi_sessions: bool = False,
     run_label: str = "run",
+    workspace_dir: Path | None = None,
     ui=None,
 ) -> SharedPlan:
     planner = cfg.model(planner_key)
@@ -407,7 +441,7 @@ def run_shared_plan(
         _write_fake_transcript(
             phase="planner",
             model=planner,
-            prompt=prompts["architect"],
+            prompt=_format_prompt_template(prompts["architect"], user_prompt=_user_prompt_from(prompts)),
             assistant_text=plan_text,
             usage=usage,
             cost=pc,
@@ -418,8 +452,9 @@ def run_shared_plan(
     else:
         plan_text, pc = run_plan_phase(
             planner,
-            prompts["architect"],
+            _format_prompt_template(prompts["architect"], user_prompt=_user_prompt_from(prompts)),
             plan_dir,
+            workspace_dir=workspace_dir,
             timeout=plan_timeout,
             pin_temperature=True,
             thinking_level=planner.thinking_level,
@@ -458,6 +493,7 @@ def prepare_shared_plans(
     parallel_workers: int = 1,
     save_pi_sessions: bool = False,
     run_label: str = "run",
+    workspace_dir: Path | None = None,
     ui=None,
 ) -> dict[tuple[str, int], SharedPlan]:
     plan_root = run_dir / "shared-plans"
@@ -485,6 +521,7 @@ def prepare_shared_plans(
                 plan_timeout=plan_timeout,
                 save_pi_sessions=save_pi_sessions,
                 run_label=run_label,
+                workspace_dir=workspace_dir,
                 ui=phase_ui,
             )
             if ui:
@@ -563,7 +600,7 @@ def run_condition_trial(
         _write_fake_transcript(
             phase="implementer",
             model=implementer,
-            prompt=prompts["implement"].replace("{plan}", plan_text),
+            prompt=_format_prompt_template(prompts["implement"], user_prompt=_user_prompt_from(prompts), plan=plan_text),
             assistant_text=f"Built synthetic MiniDesk for {cond.id}. BUILD COMPLETE",
             usage=usage,
             cost=ic,
@@ -576,7 +613,7 @@ def run_condition_trial(
     else:
         impl = run_impl_phase(
             implementer,
-            prompts["implement"],
+            _format_prompt_template(prompts["implement"], user_prompt=_user_prompt_from(prompts), plan=plan_text),
             plan_text,
             build_dir,
             timeout=impl_timeout,
@@ -788,6 +825,8 @@ def _main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     rp = sub.add_parser("run", help="run the benchmark")
     rp.add_argument("--trials", type=int, default=1)
+    rp.add_argument("--prompt", type=str, default="", help="user task prompt to give to each planner")
+    rp.add_argument("--prompt-file", type=str, default="", help="read the user task prompt from a file")
     rp.add_argument("--conditions", type=str, default="", help="comma-separated condition ids from conditions.yaml")
     rp.add_argument("--models", type=str, default="",
                     help="comma-separated model keys; generate the full planner×implementer matrix")
@@ -812,7 +851,7 @@ def _main() -> None:
     rep = sub.add_parser("report", help="generate/re-generate report.html for an existing run")
     rep.add_argument("run_dir", type=str)
     rep.add_argument("--debug", action="store_true", help="show full Python tracebacks on errors")
-    args = ap.parse_args()
+    args = ap.parse_args(_normalize_argv(sys.argv[1:]))
 
     if args.cmd == "report":
         report_path = generate_report(Path(args.run_dir))
@@ -829,7 +868,9 @@ def _main() -> None:
     )
     parallel_workers = resolve_parallel(args.parallel)
 
+    user_prompt = _load_user_prompt(args.prompt, args.prompt_file)
     prompts = {
+        "user_prompt": user_prompt,
         "architect": _load_prompt("architect.md"),
         "implement": _load_prompt("implement.md"),
         "judge": _load_prompt("judge.md"),
@@ -846,6 +887,8 @@ def _main() -> None:
     ui.log(f"run dir: {run_dir}")
     ui.log(f"trials per condition: {args.trials}")
     ui.log(f"selection: {selection_mode}")
+    prompt_source = f"file {args.prompt_file}" if args.prompt_file else ("--prompt" if args.prompt else "default MiniDesk prompt")
+    ui.log(f"user prompt: {prompt_source} ({len(user_prompt)} chars)")
     parallel_label = "all jobs in each phase" if args.parallel == "all" else f"{parallel_workers} max"
     ui.log(f"parallel workers: {args.parallel} ({parallel_label})")
     plan_jobs = len(_unique_planners(conditions)) * args.trials
@@ -878,6 +921,7 @@ def _main() -> None:
         parallel_workers=parallel_workers,
         save_pi_sessions=args.pi_sessions and not args.dry_run,
         run_label=run_dir.name,
+        workspace_dir=Path.cwd(),
         ui=ui,
     )
 
