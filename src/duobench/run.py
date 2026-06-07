@@ -104,8 +104,11 @@ def validate_pi_models(model_specs: list[str], *, timeout: float = 60.0, ui=None
     for spec in _dedupe_ordered(model_specs):
         if ui:
             ui.log(f"validating Pi model: {spec}")
+        # Pi's --model flag accepts the thinking label, but we drive it explicitly
+        # via set_thinking() in each phase, so strip it here for a clean model check.
+        bare_spec, _, _ = spec.partition(":")
         try:
-            with PiSession(cwd=Path.cwd(), enable_tools=False, persist_session=False, initial_model=spec) as s:
+            with PiSession(cwd=Path.cwd(), enable_tools=False, persist_session=False, initial_model=bare_spec) as s:
                 result = s.prompt("Reply with OK.", timeout=timeout)
                 if "ok" not in result.text.lower():
                     raise ConfigError(f"model validation for {spec!r} returned unexpected response: {result.text[:120]}")

@@ -51,3 +51,23 @@ def test_matrix_selection_accepts_direct_pi_specs_and_rejects_mixed_styles():
         select_run_conditions(_cfg(), condition_ids=["kimi-x-gpt"], model_keys=["kimi"])
     with pytest.raises(ConfigError):
         select_run_conditions(_cfg(), planner_keys=["kimi"])
+
+
+def test_model_spec_thinking_suffix_is_extracted_from_config():
+    cfg = _cfg()
+    parsed = cfg.model("kimi:high")
+    assert parsed.thinking_level == "high"
+    assert parsed.key == "kimi:high"
+    assert parsed.model_id == "kimi-model"
+
+    parsed_direct = cfg.model("opus-provider/opus-model:low")
+    assert parsed_direct.thinking_level == "low"
+    assert parsed_direct.provider == "opus-provider"
+    assert parsed_direct.model_id == "opus-model"
+
+    parsed_registry_override = cfg.model("kimi:low")
+    assert parsed_registry_override.thinking_level == "low"
+    assert parsed_registry_override.provider == "kimi-provider"
+
+    with pytest.raises(ConfigError, match="unknown thinking level"):
+        cfg.model("kimi:banana")

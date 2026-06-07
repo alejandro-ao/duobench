@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib import resources
 from pathlib import Path
 
@@ -50,13 +50,40 @@ class Config:
     costs: dict[str, Pricing] | None = None
 
     def model(self, key: str) -> Model:
-        if key in self.models:
-            return self.models[key]
-        pricing = (self.costs or {}).get(key)
-        return Model(key=key, provider="", model_id=key, pricing=pricing)
+        # The CLI accepts Pi-style specs with an optional `:thinking` suffix
+        # (e.g. `kimi-coding/kimi-for-coding:high`). Split the suffix first,
+        # then look up the registry; the registry is keyed by the spec form
+        # the user originally wrote (full Pi spec OR short alias).
+        spec_key, _, suffix = key.partition(":")
+        cli_thinking = _validate_thinking(suffix) if suffix else None
+        if spec_key in self.models:
+            base = self.models[spec_key]
+            if cli_thinking is not None and cli_thinking != base.thinking_level:
+                return replace(base, key=key, thinking_level=cli_thinking)
+            return base if key == spec_key else replace(base, key=key)
+        # Fall back to interpreting the spec as `provider/model_id` (Pi's CLI form).
+        provider, _, model_id = spec_key.partition("/")
+        pricing = (self.costs or {}).get(key) or (self.costs or {}).get(spec_key) or (self.costs or {}).get(model_id)
+        return Model(
+            key=key,
+            provider=provider,
+            model_id=model_id or spec_key,
+            pricing=pricing,
+            thinking_level=cli_thinking,
+        )
 
 
 THINKING_LEVELS = {"off", "minimal", "low", "medium", "high", "xhigh"}
+
+
+def _validate_thinking(value: str) -> str:
+    """Return the thinking level from a `:suffix`, raising ConfigError if invalid."""
+    level = value.strip().lower()
+    if level not in THINKING_LEVELS:
+        raise ConfigError(
+            f"unknown thinking level {value!r}; expected one of {', '.join(sorted(THINKING_LEVELS))}"
+        )
+    return level
 
 
 def _require(cond: bool, msg: str) -> None:
