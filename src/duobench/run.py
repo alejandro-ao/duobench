@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -443,6 +444,55 @@ def _git(args: list[str], cwd: Path, *, timeout: float = 60.0) -> str:
     return proc.stdout.strip()
 
 
+def _origin_repo_slug(remote_url: str) -> str:
+    """Return owner/repo from a GitHub remote URL."""
+    remote_url = remote_url.strip()
+    patterns = (
+        r"^git@github\.com:([^/]+/[^/]+?)(?:\.git)?$",
+        r"^https://github\.com/([^/]+/[^/]+?)(?:\.git)?/?$",
+        r"^ssh://git@github\.com/([^/]+/[^/]+?)(?:\.git)?$",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, remote_url)
+        if match:
+            return match.group(1)
+    raise ConfigError(f"could not infer GitHub repository from origin remote: {remote_url}")
+
+
+def _gh(args: list[str], cwd: Path, *, timeout: float = 60.0) -> str:
+    proc = subprocess.run(
+        ["gh", *args],
+        cwd=cwd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout,
+    )
+    if proc.returncode != 0:
+        raise ConfigError(f"gh {' '.join(args)} failed: {proc.stderr.strip() or proc.stdout.strip()}")
+    return proc.stdout.strip()
+
+
+def _install_origin_only_push_guard(worktree_dir: Path) -> None:
+    hooks_dir = worktree_dir / ".git-hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hook = hooks_dir / "pre-push"
+    hook.write_text(
+        """#!/bin/sh
+remote_name="$1"
+remote_url="$2"
+
+if [ "$remote_name" != "origin" ]; then
+  echo "duobench: refusing to push to '$remote_name' ($remote_url); push implementer PRs to origin only" >&2
+  exit 1
+fi
+""",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+    _git(["config", "--worktree", "core.hooksPath", ".git-hooks"], worktree_dir)
+
+
 def prepare_worktree(repo_dir: Path, worktree_dir: Path, *, branch: str) -> Path:
     """Create an isolated git worktree for one implementer trial."""
     _git(["rev-parse", "--show-toplevel"], repo_dir)
@@ -450,6 +500,9 @@ def prepare_worktree(repo_dir: Path, worktree_dir: Path, *, branch: str) -> Path
     if worktree_dir.exists():
         shutil.rmtree(worktree_dir)
     _git(["worktree", "add", "-B", branch, str(worktree_dir), "HEAD"], repo_dir, timeout=120.0)
+    origin_repo = _origin_repo_slug(_git(["remote", "get-url", "origin"], worktree_dir))
+    _gh(["repo", "set-default", origin_repo], worktree_dir)
+    _install_origin_only_push_guard(worktree_dir)
     return worktree_dir
 
 

@@ -16,7 +16,7 @@ Instructions:
 4. Make the necessary code changes.
 5. Run appropriate tests or checks when possible.
 6. Commit your changes.
-7. Push the branch and create a GitHub pull request for the issue.
+7. Push the branch to `origin` and create a GitHub pull request against `origin`'s repository. Never push to the `upstream` remote or open the PR against the upstream/parent repository.
 8. In your final response, return ONLY the PR id. Do not include prose, markdown, a summary, or anything else.
 
 The PR id may be the PR number (for example `123`) or a canonical PR URL.
