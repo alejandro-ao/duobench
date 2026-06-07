@@ -192,6 +192,9 @@ uv run duobench report runs/<timestamp>
 | `--impl-timeout SEC` | `1800` | Implementer wall-clock timeout. |
 | `--judge-timeout SEC` | `300` | Per-judge timeout. |
 | `--pi-sessions` / `--no-pi-sessions` | on | Save Pi sessions in Pi's normal session store. |
+| `--live` / `--no-live` | auto (TTY) | Rich live dashboard. |
+| `--skip-model-check` | off | Skip the fail-fast Pi model/auth validation pass. |
+| `--debug` | off | Show full Python tracebacks on errors. |
 | `--live` / `--no-live` | auto | Rich live dashboard. |
 | `--skip-model-check` | off | Skip fail-fast Pi model/auth validation. |
 
@@ -201,24 +204,40 @@ uv run duobench report runs/<timestamp>
 
 ### Model Specs
 
-`--models`, `--planners`, `--implementers`, and `--judges` accept the same model specs you would pass to Pi's `--model` flag, including thinking labels:
+`--models`, `--planners`, `--implementers`, `--judges`, and the `planner`/`implementer` fields in `conditions.yaml` all accept the same model spec format. There are two equivalent ways to write a spec:
+
+- **Registry key** (a short alias defined in `config/models.yaml`): `kimi-k2.6`, `gpt-5.5`
+- **Pi spec** (what you would pass to `pi --model`): `kimi-coding/kimi-for-coding`, `openai-codex/gpt-5.5`
+
+You can append a `:thinking` suffix to either form to set the thinking level for that run:
 
 ```bash
---models openai-codex/gpt-5.5:high,kimi-coding/kimi-for-coding:high
+--models kimi-k2.6:high,openai-codex/gpt-5.5:high
 ```
+
+Valid levels are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`. A registry key with a `:thinking` suffix overrides the registry's `thinking` field for that run. Unknown keys are marked with `*` in dry-run output — they're passed straight to Pi but skip the registry's defaults for `provider`, `thinking`, and `pricing`.
 
 Before a real benchmark starts, duobench validates each unique model by launching Pi with that model and asking it to reply `OK`. Use `--skip-model-check` only if you intentionally want to bypass that fail-fast auth/model check.
 
 ### Cost Accounting
 
-Duobench prefers Pi/provider-reported cost when available. If Pi does not report cost, duobench falls back to optional configured rates from `costs.yaml`. Rates are dollars per million tokens:
+Duobench prefers Pi/provider-reported cost when available. If Pi does not report cost, duobench falls back to the model's `pricing` block in `config/models.yaml` or, failing that, rates from `costs.yaml`. Rates are dollars per million tokens:
 
 ```yaml
+# config/models.yaml — pricing for a registry key
 models:
-  openai-codex/gpt-5.5:high:
-    input: 5.00
-    output: 30.00
+  kimi-k2.6:
+    provider: kimi-coding
+    model_id: kimi-for-coding
+    pricing: { input: 0.95, output: 4.00 }
+```
 
+```yaml
+# costs.yaml — pricing for a direct Pi spec, keyed by the exact spec string
+models:
+  kimi-coding/kimi-for-coding:
+    input: 0.95
+    output: 4.00
   kimi-coding/kimi-for-coding:high:
     input: 0.95
     output: 4.00
@@ -226,7 +245,7 @@ models:
     cache_write: 0.95
 ```
 
-If neither Pi nor `costs.yaml` provides cost information, duobench records cost as `0` with source `unknown`.
+If neither Pi nor any of the above provides cost information, duobench records cost as `0` with source `unknown`. The dry-run leaderboard prints a warning when any condition has source `unknown`, because `cost_efficiency` is meaningless without pricing.
 
 ### Optional Config Files
 
