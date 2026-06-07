@@ -1,32 +1,78 @@
-# duobench
+<div align="center">
 
-Benchmark **planner × implementer** AI coding-agent duos on real GitHub issue → pull request workflows.
+```
+    ██████╗ ██╗   ██╗ ██████╗ ██████╗ ███████╗███╗   ██╗ ██████╗██╗  ██╗
+    ██╔══██╗██║   ██║██╔═══██╗██╔══██╗██╔════╝████╗  ██║██╔════╝██║  ██║
+    ██║  ██║██║   ██║██║   ██║██████╔╝█████╗  ██╔██╗ ██║██║     ███████║
+    ██║  ██║██║   ██║██║   ██║██╔══██╗██╔══╝  ██║╚██╗██║██║     ██╔══██║
+    ██████╔╝╚██████╔╝╚██████╔╝██████╔╝███████╗██║ ╚████║╚██████╗██║  ██║
+    ╚═════╝  ╚═════╝  ╚═════╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝╚═╝  ╚═╝
+```
 
-`duobench` runs every planner/implementer pairing you choose through [Pi](https://pi.dev) RPC:
+<h3>Benchmark planner × implementer AI coding-agent duos on real GitHub issue → pull request workflows</h3>
 
-1. A planner model inspects a GitHub issue and the local repo, then writes a handoff plan.
-2. An implementer model receives the issue + plan in an isolated git worktree.
-3. The implementer fixes the issue, commits, pushes, opens a PR, and returns only the PR id.
-4. Judge models inspect the issue and PR with `git`/`gh` and score the result.
-5. The harness writes transcripts, costs, charts, CSVs, and an HTML report.
+<p>
+  <a href="https://github.com/alejandro-ao/agent-synergy-eval/blob/main/LICENSE">
+    <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT">
+  </a>
+  <a href="https://github.com/alejandro-ao/agent-synergy-eval/actions">
+    <img src="https://img.shields.io/badge/tests-passing-brightgreen" alt="Tests">
+  </a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/pi-integrated-9cf" alt="Pi">
+  <a href="https://github.com/alejandro-ao/agent-synergy-eval/stargazers">
+    <img src="https://img.shields.io/github/stars/alejandro-ao/agent-synergy-eval?style=social" alt="GitHub Stars">
+  </a>
+</p>
 
-The goal is to measure which model pairings produce the best quality-per-dollar for realistic software engineering work.
+<p>
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#installation">Install</a> •
+  <a href="#usage">Usage</a> •
+  <a href="#output">Output</a> •
+  <a href="#design">Design</a>
+</p>
 
-> **Important:** real runs create branches and pull requests. Use a repo where that is expected, and consider starting with one condition and one trial.
+</div>
+
+---
+
+## Overview
+
+**duobench** runs every planner/implementer pairing you choose through [Pi](https://pi.dev) RPC to measure which model duos produce the best **quality-per-dollar** for realistic software engineering work.
+
+```
+┌─────────────┐     ┌─────────────────┐     ┌─────────────┐     ┌──────────┐
+│   GitHub    │────▶│     Planner     │────▶│ Implementer │────▶│    PR    │
+│    Issue    │     │  (plan + handoff)│     │  (code + push)│     │          │
+└─────────────┘     └─────────────────┘     └─────────────┘     └────┬─────┘
+                                                                     │
+                              ┌──────────────────────────────────────┘
+                              ▼
+                       ┌─────────────┐
+                       │    Judge    │  ◄── scores on 4 dimensions + cost
+                       │  (evaluate) │
+                       └─────────────┘
+```
+
+### What It Does
+
+1. **Planner** inspects a GitHub issue and the local repo, then writes a handoff plan.
+2. **Implementer** receives the issue + plan in an isolated git worktree, fixes the issue, commits, pushes, and opens a PR.
+3. **Judge** models inspect the issue and PR with `git`/`gh` and score the result.
+4. **Harness** writes transcripts, costs, charts, CSVs, and an HTML report.
+
+> ⚠️ **Real runs create branches and pull requests.** Use a repo where that is expected, and consider starting with one condition and one trial.
 
 ---
 
 ## Requirements
 
-For real runs you need:
-
 - Python 3.11+
 - [`uv`](https://docs.astral.sh/uv/)
 - `git`
-- GitHub CLI: [`gh`](https://cli.github.com/)
-- authenticated `gh` with permission to read issues and create PRs
-- `pi` on PATH, with the model providers in your config available
-- a clean-ish local checkout of the GitHub repo you want to benchmark
+- GitHub CLI: [`gh`](https://cli.github.com/) (authenticated)
+- `pi` on PATH, with configured model providers
 
 Check basics:
 
@@ -38,36 +84,34 @@ git status
 
 ---
 
-## Install
+## Installation
 
-From this checkout:
+**From this checkout:**
 
 ```bash
 uv sync
 uv run playwright install chromium
 ```
 
-As a uv tool from PyPI:
+**As a uv tool from PyPI:**
 
 ```bash
 uv tool install duobench
 uvx playwright install chromium
 ```
 
-Or directly from GitHub:
+**Or directly from GitHub:**
 
 ```bash
 uv tool install git+https://github.com/alejandro-ao/agent-synergy-eval.git
 uvx playwright install chromium
 ```
 
-`playwright` is still used by dry-run/demo artifacts and legacy report checks.
-
 ---
 
 ## Quick Start
 
-### 1. Validate without spending model/API tokens
+### 1. Validate without spending tokens
 
 ```bash
 uv run duobench --dry-run --models kimi-k2.6,gpt-5.5 --trials 1 --no-live
@@ -98,27 +142,27 @@ uv run duobench \
   --trials 1
 ```
 
-With three models and one trial, this runs:
-
-- 3 planner sessions
-- 9 implementer sessions / PR attempts
-- judge panel over every PR
+With three models and one trial, this runs **3 planner sessions**, **9 implementer sessions**, and a **judge panel over every PR**.
 
 ---
 
-## Common Commands
+## Usage
+
+### Common Commands
 
 ```bash
 # Full planner × implementer matrix from Pi model specs
 uv run duobench --issue https://github.com/org/repo/issues/123 --models openai-codex/gpt-5.5:high,kimi-coding/kimi-for-coding:high --trials 1
 
 # Rectangular matrix: selected planners crossed with selected implementers
-uv run duobench --issue https://github.com/org/repo/issues/123 --planners openai-codex/gpt-5.5:high,kimi-coding/kimi-for-coding:high --implementers kimi-coding/kimi-for-coding:high --trials 1
+uv run duobench --issue https://github.com/org/repo/issues/123 \
+  --planners openai-codex/gpt-5.5:high,kimi-coding/kimi-for-coding:high \
+  --implementers kimi-coding/kimi-for-coding:high --trials 1
 
 # Explicit conditions from config/conditions.yaml
 uv run duobench --issue https://github.com/org/repo/issues/123 --conditions gpt-x-kimi --trials 1
 
-# Serial execution, useful to avoid PR/branch chaos while testing
+# Serial execution (useful to avoid PR/branch chaos while testing)
 uv run duobench --issue https://github.com/org/repo/issues/123 --models kimi-k2.6,gpt-5.5 --parallel 1 --trials 1
 
 # Regenerate an HTML report from an existing run
@@ -127,9 +171,7 @@ uv run duobench report runs/<timestamp>
 
 `duobench ...` is shorthand for `duobench run ...`.
 
----
-
-## CLI Flags
+### CLI Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -155,9 +197,9 @@ uv run duobench report runs/<timestamp>
 
 ---
 
-## Models and Costs
+## Models & Costs
 
-### Model specs are Pi model specs
+### Model Specs
 
 `--models`, `--planners`, `--implementers`, and `--judges` accept the same model specs you would pass to Pi's `--model` flag, including thinking labels:
 
@@ -165,9 +207,9 @@ uv run duobench report runs/<timestamp>
 --models openai-codex/gpt-5.5:high,kimi-coding/kimi-for-coding:high
 ```
 
-There is no required duobench model alias layer for normal use. Before a real benchmark starts, duobench validates each unique model by launching Pi with that model and asking it to reply `OK`. Use `--skip-model-check` only if you intentionally want to bypass that fail-fast auth/model check.
+Before a real benchmark starts, duobench validates each unique model by launching Pi with that model and asking it to reply `OK`. Use `--skip-model-check` only if you intentionally want to bypass that fail-fast auth/model check.
 
-### Cost accounting
+### Cost Accounting
 
 Duobench prefers Pi/provider-reported cost when available. If Pi does not report cost, duobench falls back to optional configured rates from `costs.yaml`. Rates are dollars per million tokens:
 
@@ -186,9 +228,9 @@ models:
 
 If neither Pi nor `costs.yaml` provides cost information, duobench records cost as `0` with source `unknown`.
 
-### Optional config files
+### Optional Config Files
 
-`config/conditions.yaml` is still useful for named manual pairings:
+`config/conditions.yaml` is useful for named manual pairings:
 
 ```yaml
 conditions:
@@ -205,30 +247,22 @@ conditions:
 
 ### Planner
 
-The planner receives the GitHub issue URL and is told to:
-
-- inspect the issue using `gh`
-- inspect the local repository
-- produce a concise implementation plan
-- avoid modifying files, branches, commits, pushes, or PRs
+- Inspect the issue using `gh`
+- Inspect the local repository
+- Produce a concise implementation plan
+- **Avoid** modifying files, branches, commits, pushes, or PRs
 
 ### Implementer
 
-The implementer receives the issue URL and planner handoff plan. It is told to:
-
-- inspect the issue with `gh`
-- create a branch in its isolated worktree
-- make the code changes
-- run appropriate checks
-- commit and push
-- open a PR
-- return only the PR id or PR URL
+- Inspect the issue with `gh`
+- Create a branch in an isolated worktree
+- Make code changes and run appropriate checks
+- Commit, push, and open a PR
+- Return only the PR id or PR URL
 
 ### Judge
 
 Each judge receives the issue URL, PR id, planner handoff, and harness metadata. It can inspect the PR with `git` and `gh`, but must not mutate anything.
-
-Judges score:
 
 | Dimension | Meaning |
 |-----------|---------|
@@ -241,7 +275,7 @@ Judges score:
 
 ---
 
-## Output Layout
+## Output
 
 Each run writes to `runs/<timestamp>/`:
 
@@ -313,45 +347,37 @@ tail -f /tmp/duobench.log
 
 ## Safety Tips
 
-- Start with `--dry-run`.
-- Start real runs with `--conditions one-condition --trials 1`.
-- Use `--parallel 1` until you are comfortable with branch/PR behavior.
-- Run against a test repository or issue first.
-- Expect one PR per implementer attempt.
-- Judges are instructed not to mutate PRs, but implementers intentionally do.
+- ✅ Start with `--dry-run`.
+- ✅ Start real runs with `--conditions one-condition --trials 1`.
+- ✅ Use `--parallel 1` until you are comfortable with branch/PR behavior.
+- ✅ Run against a test repository or issue first.
+- ⚠️ Expect one PR per implementer attempt.
+- ⚠️ Judges are instructed not to mutate PRs, but implementers intentionally do.
 
 ---
 
 ## Troubleshooting
 
-### `--issue is required`
-
-Real runs require a GitHub issue:
-
-```bash
-uv run duobench --issue https://github.com/org/repo/issues/123 --models kimi-k2.6
-```
-
-### `gh CLI is required`
-
-Install and authenticate GitHub CLI:
-
-```bash
-gh auth login
-gh auth status
-```
-
-### Pi cannot find a model
-
-Check `config/models.yaml`. `provider` and `model_id` must match what your Pi installation knows.
-
-### Too many branches/PRs
-
-Use fewer models, fewer trials, explicit `--conditions`, and `--parallel 1`.
+| Problem | Solution |
+|---------|----------|
+| `--issue is required` | Real runs require a GitHub issue: `uv run duobench --issue https://github.com/org/repo/issues/123 --models kimi-k2.6` |
+| `gh CLI is required` | Install and authenticate: `gh auth login && gh auth status` |
+| Pi cannot find a model | Check `config/models.yaml`. `provider` and `model_id` must match what your Pi installation knows. |
+| Too many branches/PRs | Use fewer models, fewer trials, explicit `--conditions`, and `--parallel 1`. |
 
 ---
 
-## Design Docs
+## Design
 
 - [`DESIGN.md`](DESIGN.md) — design rationale
 - [`.exploration/`](.exploration/) — architecture walkthrough generated for this codebase
+
+---
+
+<div align="center">
+
+**Made with ❤️ by [Alejandro AO](https://github.com/alejandro-ao)**
+
+<a href="https://github.com/alejandro-ao/agent-synergy-eval/stargazers">⭐ Star this repo</a> if you find it useful!
+
+</div>
