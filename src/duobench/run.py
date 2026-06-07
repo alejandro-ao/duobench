@@ -47,6 +47,7 @@ class SharedPlan:
     trial: int
     plan_text: str
     cost_usd: float
+    cost_source: str
     source_dir: Path
 
 
@@ -101,14 +102,14 @@ def _load_issue_url(issue: str, *, dry_run: bool) -> str:
 
 
 def validate_pi_models(model_specs: list[str], *, timeout: float = 60.0, ui=None) -> None:
-    for spec in _dedupe_ordered(model_specs):
+    # Pi's --model flag accepts the thinking label, but we drive it explicitly
+    # via set_thinking() in each phase, so strip it before deduping — specs that
+    # differ only in thinking level validate the same underlying model once.
+    for spec in _dedupe_ordered([s.partition(":")[0] for s in model_specs]):
         if ui:
             ui.log(f"validating Pi model: {spec}")
-        # Pi's --model flag accepts the thinking label, but we drive it explicitly
-        # via set_thinking() in each phase, so strip it here for a clean model check.
-        bare_spec, _, _ = spec.partition(":")
         try:
-            with PiSession(cwd=Path.cwd(), enable_tools=False, persist_session=False, initial_model=bare_spec) as s:
+            with PiSession(cwd=Path.cwd(), enable_tools=False, persist_session=False, initial_model=spec) as s:
                 result = s.prompt("Reply with OK.", timeout=timeout)
                 if "ok" not in result.text.lower():
                     raise ConfigError(f"model validation for {spec!r} returned unexpected response: {result.text[:120]}")
@@ -128,30 +129,14 @@ def _check_issue_prereqs(*, dry_run: bool) -> None:
     _git(["rev-parse", "--show-toplevel"], Path.cwd())
 
 
-def _is_unknown_model(model: Model, spec: str) -> bool:
-    """Return True when the spec is being passed straight to Pi without a registry entry.
+def _is_unknown_model(cfg: Config, spec: str) -> bool:
+    """Return True when the spec has no registry entry in models.yaml.
 
-    A model is "unknown" when Config.model() had to fall back to interpreting
-    the spec as a provider/model_id pair (no registry defaults, no configured
-    pricing). In real runs these will likely fail at set_model() time.
+    Such specs are passed straight to Pi and skip the registry's defaults
+    for provider, thinking, and pricing (an optional `:thinking` suffix
+    does not affect registry lookup).
     """
-    if model.pricing is not None:
-        return False
-    return "/" in spec or ":" in spec or model.provider == ""
-
-
-def _cost_source_for(model: Model, cost_usd: float) -> str:
-    """Best-effort reconstruction of the cost source for a phase result.
-
-    compute_cost() chooses between 'pi_reported', 'configured', and
-    'unknown'. We don't always have a PhaseCost object here (e.g. shared
-    plan only stashes cost_usd), so derive the source from what we know.
-    """
-    if cost_usd > 0 and model.pricing is not None:
-        return "configured"
-    if model.pricing is not None:
-        return "configured"
-    return "unknown"
+    return spec.partition(":")[0] not in cfg.models
 
 
 def _merge_cost_source(*sources: str) -> str:
@@ -534,6 +519,7 @@ def run_shared_plan(
             duration_s=float(_stable_int(f"{planner_key}:plan:{trial}:duration", 18, 75)),
         )
         plan_cost = pc.usd
+        plan_source = pc.source
     else:
         plan_text, pc = run_plan_phase(
             planner,
@@ -548,11 +534,13 @@ def run_shared_plan(
             ui=ui,
         )
         plan_cost = pc.usd
+        plan_source = pc.source
     (plan_dir / "shared-plan.json").write_text(json.dumps(
         {
             "planner": planner_key,
             "trial": trial,
             "cost_usd": round(plan_cost, 6),
+            "cost_source": plan_source,
             "plan_dir": str(plan_dir),
         },
         indent=2,
@@ -562,6 +550,7 @@ def run_shared_plan(
         trial=trial,
         plan_text=plan_text,
         cost_usd=plan_cost,
+        cost_source=plan_source,
         source_dir=plan_dir,
     )
 
@@ -676,8 +665,7 @@ def run_condition_trial(
     copy_plan_artifacts(shared_plan, trial_dir)
     plan_text = shared_plan.plan_text
     plan_cost = shared_plan.cost_usd
-    planner = cfg.model(cond.planner)
-    plan_source = _cost_source_for(planner, plan_cost)
+    plan_source = shared_plan.cost_source
 
     # --- implement ---
     if dry_run:
@@ -1036,8 +1024,8 @@ def _main() -> None:
         implementer_model = cfg.model(c.implementer)
         planner_thinking = planner_model.thinking_level or "default/off"
         implementer_thinking = implementer_model.thinking_level or "default/off"
-        planner_note = " *" if _is_unknown_model(planner_model, c.planner) else ""
-        implementer_note = " *" if _is_unknown_model(implementer_model, c.implementer) else ""
+        planner_note = " *" if _is_unknown_model(cfg, c.planner) else ""
+        implementer_note = " *" if _is_unknown_model(cfg, c.implementer) else ""
         ui.log(
             f"  - {c.id}: planner={c.planner}{planner_note} (thinking={planner_thinking}) "
             f"implementer={c.implementer}{implementer_note} (thinking={implementer_thinking})"

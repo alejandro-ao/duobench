@@ -195,8 +195,6 @@ uv run duobench report runs/<timestamp>
 | `--live` / `--no-live` | auto (TTY) | Rich live dashboard. |
 | `--skip-model-check` | off | Skip the fail-fast Pi model/auth validation pass. |
 | `--debug` | off | Show full Python tracebacks on errors. |
-| `--live` / `--no-live` | auto | Rich live dashboard. |
-| `--skip-model-check` | off | Skip fail-fast Pi model/auth validation. |
 
 ---
 

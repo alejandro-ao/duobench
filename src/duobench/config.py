@@ -66,7 +66,7 @@ class Config:
         # provider empty so Pi can try to resolve it.
         provider, _, model_id = spec_key.partition("/")
         provider = provider if model_id else ""
-        pricing = (self.costs or {}).get(key) or (self.costs or {}).get(spec_key) or (self.costs or {}).get(model_id)
+        pricing = (self.costs or {}).get(key) or (self.costs or {}).get(spec_key)
         return Model(
             key=key,
             provider=provider,

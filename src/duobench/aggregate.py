@@ -55,17 +55,10 @@ def _std(xs: list[float]) -> float:
 
 
 def _majority_source(records: list[TrialRecord]) -> str:
-    """Return the most common cost source across trials.
-
-    Defaults to 'unknown' when no per-trial source was recorded. The
-    `source` attribute on TrialRecord is set by TrialRecord; trials that
-    didn't go through compute_cost() (older transcripts) leave it unset.
-    """
-    sources = [getattr(r, "cost_source", None) for r in records]
-    sources = [s for s in sources if s]
-    if not sources:
+    """Return the most common cost source across trials ('unknown' if none)."""
+    if not records:
         return "unknown"
-    return statistics.mode(sources)
+    return statistics.mode(r.cost_source for r in records)
 
 
 def aggregate(records: list[TrialRecord], judges: list[str]) -> dict:
