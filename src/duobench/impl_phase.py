@@ -12,6 +12,8 @@ the agent to keep working until it signals completion.
 
 from __future__ import annotations
 
+import json
+import subprocess
 import time
 import re
 from dataclasses import dataclass, field
@@ -19,7 +21,7 @@ from pathlib import Path
 
 from duobench.config import Model
 from duobench.cost import PhaseCost, compute_cost
-from duobench.pi_rpc import PiRpcError, PiSession, Usage
+from duobench.pi_rpc import PiRpcError, PiRpcStalled, PiSession, Usage
 from duobench.transcript import new_transcript
 
 # Heuristic completion markers the implementer is asked to emit when done.
@@ -32,13 +34,14 @@ _CONTINUE_MSG = (
     "the PR. When the PR exists, reply with only the PR id."
 )
 _MAX_FOLLOW_UPS = 12  # safety bound on the nudge loop, not a per-agent turn cap
+_FOLLOW_UP_IDLE_TIMEOUT = 120.0
 
 
 @dataclass
 class ImplResult:
     cost: PhaseCost
     turns: int
-    status: str                      # "complete" | "timeout" | "stopped"
+    status: str                      # "complete" | "timeout" | "stalled" | "stopped"
     final_text: str = ""
     pr_id: str = ""
     duration_s: float = 0.0
@@ -59,6 +62,38 @@ def extract_pr_id(text: str) -> str:
 def _looks_done(text: str) -> bool:
     low = text.lower()
     return bool(extract_pr_id(text)) or any(m in low for m in _DONE_MARKERS)
+
+
+def _detect_existing_pr_id(build_dir: Path) -> str:
+    """Best-effort reality check for a PR created by the current worktree branch."""
+    try:
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=build_dir,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=15.0,
+        )
+        if branch.returncode != 0 or not branch.stdout.strip():
+            return ""
+        prs = subprocess.run(
+            ["gh", "pr", "list", "--head", branch.stdout.strip(), "--json", "number,url", "--limit", "1"],
+            cwd=build_dir,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30.0,
+        )
+        if prs.returncode != 0:
+            return ""
+        data = json.loads(prs.stdout or "[]")
+    except Exception:
+        return ""
+    if not isinstance(data, list) or not data:
+        return ""
+    number = data[0].get("number")
+    return str(number) if number else extract_pr_id(str(data[0].get("url", "")))
 
 
 def run_impl_phase(
@@ -123,7 +158,13 @@ def run_impl_phase(
                 ui.add_turn_result(result.usage, turn_cost.usd, turn_cost.reported_usd)
             final_text = result.text
             pr_id = extract_pr_id(result.text)
+            if not pr_id and not _looks_done(result.text):
+                pr_id = _detect_existing_pr_id(build_dir)
+                if pr_id:
+                    notes.append("completion detected from existing PR rather than final response text")
             if _looks_done(result.text):
+                status = "complete"
+            elif pr_id:
                 status = "complete"
             else:
                 for _ in range(_MAX_FOLLOW_UPS):
@@ -132,7 +173,24 @@ def run_impl_phase(
                         notes.append(f"implementation exceeded total wall-clock timeout of {timeout}s")
                         break
                     started = time.time()
-                    result = s.follow_up(_CONTINUE_MSG, timeout=remaining_timeout())
+                    try:
+                        result = s.follow_up(
+                            _CONTINUE_MSG,
+                            timeout=remaining_timeout(),
+                            idle_timeout=min(_FOLLOW_UP_IDLE_TIMEOUT, remaining_timeout()),
+                        )
+                    except PiRpcStalled as e:
+                        notes.append(f"follow-up stalled: {e}; retrying as fresh prompt")
+                        try:
+                            result = s.prompt(
+                                _CONTINUE_MSG,
+                                timeout=remaining_timeout(),
+                                idle_timeout=min(_FOLLOW_UP_IDLE_TIMEOUT, remaining_timeout()),
+                            )
+                        except PiRpcStalled as retry_error:
+                            status = "stalled"
+                            notes.append(f"fresh prompt after stalled follow-up also stalled: {retry_error}")
+                            break
                     ended = time.time()
                     turns += 1
                     total.add(result.usage)
@@ -142,12 +200,22 @@ def run_impl_phase(
                         ui.add_turn_result(result.usage, turn_cost.usd, turn_cost.reported_usd)
                     final_text = result.text
                     pr_id = extract_pr_id(result.text) or pr_id
+                    if not pr_id and not _looks_done(result.text):
+                        pr_id = _detect_existing_pr_id(build_dir)
+                        if pr_id:
+                            notes.append("completion detected from existing PR rather than final response text")
                     if _looks_done(result.text):
+                        status = "complete"
+                        break
+                    if pr_id:
                         status = "complete"
                         break
                 else:
                     status = "stopped"
                     notes.append(f"hit max follow-ups ({_MAX_FOLLOW_UPS}) without completion signal")
+        except PiRpcStalled as e:
+            status = "stalled"
+            notes.append(f"pi_rpc stalled: {e}")
         except PiRpcError as e:
             status = "timeout"
             notes.append(f"pi_rpc error/timeout: {e}")

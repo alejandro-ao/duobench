@@ -27,6 +27,10 @@ class PiRpcError(Exception):
     """Raised on RPC protocol errors, rejected set_model, or timeout."""
 
 
+class PiRpcStalled(PiRpcError):
+    """Raised when a queued turn stops producing RPC events before agent_end."""
+
+
 def _reported_cost_to_float(value) -> float:
     """Coerce Pi/provider reported cost into USD when possible.
 
@@ -260,15 +264,19 @@ class PiSession:
         data = resp.get("data")
         return data if isinstance(data, dict) else {}
 
-    def prompt(self, message: str, *, timeout: float) -> TurnResult:
+    def prompt(self, message: str, *, timeout: float, idle_timeout: float | None = None) -> TurnResult:
         self._send({"type": "prompt", "message": message})
         self._await_response("prompt", timeout=15.0)
-        return self._collect_until_agent_end(timeout=timeout)
+        return self._collect_until_agent_end(timeout=timeout, idle_timeout=idle_timeout)
 
-    def follow_up(self, message: str, *, timeout: float) -> TurnResult:
+    def follow_up(self, message: str, *, timeout: float, idle_timeout: float | None = None) -> TurnResult:
         self._send({"type": "follow_up", "message": message})
         self._await_response("follow_up", timeout=15.0)
-        return self._collect_until_agent_end(timeout=timeout)
+        return self._collect_until_agent_end(
+            timeout=timeout,
+            idle_timeout=idle_timeout,
+            require_agent_start=True,
+        )
 
     # -- event collection --
 
@@ -295,9 +303,17 @@ class PiSession:
             pending.append(ev)
         raise PiRpcError(f"timeout waiting for response to '{command}'")
 
-    def _collect_until_agent_end(self, *, timeout: float) -> TurnResult:
+    def _collect_until_agent_end(
+        self,
+        *,
+        timeout: float,
+        idle_timeout: float | None = None,
+        require_agent_start: bool = False,
+    ) -> TurnResult:
         """Drain events until agent_end; aggregate assistant text + usage."""
         deadline = time.monotonic() + timeout
+        idle_deadline = time.monotonic() + idle_timeout if idle_timeout is not None else None
+        saw_agent_start = not require_agent_start
         cumulative = Usage()
         final_text_parts: list[str] = []
         messages: list = []
@@ -310,10 +326,20 @@ class PiSession:
                     raise PiRpcError(
                         f"pi exited mid-turn. stderr: {self._stderr_tail()}"
                     )
+                if idle_deadline is not None and time.monotonic() >= idle_deadline:
+                    if not saw_agent_start:
+                        raise PiRpcStalled(
+                            f"no agent_start after queued turn for {idle_timeout}s"
+                        )
+                    raise PiRpcStalled(f"no RPC events for {idle_timeout}s")
                 continue
 
+            if idle_timeout is not None:
+                idle_deadline = time.monotonic() + idle_timeout
             self._emit_event(ev)
             etype = ev.get("type")
+            if etype in {"agent_start", "turn_start"}:
+                saw_agent_start = True
             if etype == "agent_end":
                 messages = ev.get("messages", []) or []
                 # Aggregate cumulative usage from the full message list, then return only
