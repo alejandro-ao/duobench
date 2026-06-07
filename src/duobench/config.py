@@ -62,7 +62,10 @@ class Config:
                 return replace(base, key=key, thinking_level=cli_thinking)
             return base if key == spec_key else replace(base, key=key)
         # Fall back to interpreting the spec as `provider/model_id` (Pi's CLI form).
+        # A bare spec with no slash is treated as model_id only, leaving the
+        # provider empty so Pi can try to resolve it.
         provider, _, model_id = spec_key.partition("/")
+        provider = provider if model_id else ""
         pricing = (self.costs or {}).get(key) or (self.costs or {}).get(spec_key) or (self.costs or {}).get(model_id)
         return Model(
             key=key,

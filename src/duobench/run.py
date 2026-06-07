@@ -128,6 +128,18 @@ def _check_issue_prereqs(*, dry_run: bool) -> None:
     _git(["rev-parse", "--show-toplevel"], Path.cwd())
 
 
+def _is_unknown_model(model: Model, spec: str) -> bool:
+    """Return True when the spec is being passed straight to Pi without a registry entry.
+
+    A model is "unknown" when Config.model() had to fall back to interpreting
+    the spec as a provider/model_id pair (no registry defaults, no configured
+    pricing). In real runs these will likely fail at set_model() time.
+    """
+    if model.pricing is not None:
+        return False
+    return "/" in spec or ":" in spec or model.provider == ""
+
+
 def _issue_url_from(prompts: dict[str, str]) -> str:
     return prompts.get("issue_url", DEFAULT_ISSUE_URL)
 
@@ -985,12 +997,26 @@ def _main() -> None:
     if not args.dry_run and not args.skip_model_check:
         validate_pi_models([*(c.planner for c in conditions), *(c.implementer for c in conditions), *cfg.judges], ui=ui)
     ui.log("conditions:")
+    unknown_models: set[str] = set()
     for c in conditions:
-        planner_thinking = cfg.model(c.planner).thinking_level or "default/off"
-        implementer_thinking = cfg.model(c.implementer).thinking_level or "default/off"
+        planner_model = cfg.model(c.planner)
+        implementer_model = cfg.model(c.implementer)
+        planner_thinking = planner_model.thinking_level or "default/off"
+        implementer_thinking = implementer_model.thinking_level or "default/off"
+        planner_note = " *" if _is_unknown_model(planner_model, c.planner) else ""
+        implementer_note = " *" if _is_unknown_model(implementer_model, c.implementer) else ""
         ui.log(
-            f"  - {c.id}: planner={c.planner} (thinking={planner_thinking}) "
-            f"implementer={c.implementer} (thinking={implementer_thinking})"
+            f"  - {c.id}: planner={c.planner}{planner_note} (thinking={planner_thinking}) "
+            f"implementer={c.implementer}{implementer_note} (thinking={implementer_thinking})"
+        )
+        if planner_note:
+            unknown_models.add(c.planner)
+        if implementer_note:
+            unknown_models.add(c.implementer)
+    if unknown_models:
+        ui.log(
+            "\n* model key(s) not in config/models.yaml; using spec directly with Pi. "
+            "Add them to models.yaml to set provider defaults, thinking, and pricing."
         )
     if not args.dry_run:
         ui.log("\nTip: if this is your first run, `duobench run --dry-run` validates the pipeline without API spend.")
