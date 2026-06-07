@@ -1,0 +1,74 @@
+[
+  {
+    "id": "yasbd-lib-52",
+    "difficulty": "easy",
+    "upstream_repo": "speedyk-005/yasbd-lib",
+    "fork_repo": "alejandro-ao/yasbd-lib",
+    "fork_url": "https://github.com/alejandro-ao/yasbd-lib",
+    "issue_number": 52,
+    "issue_url": "https://github.com/speedyk-005/yasbd-lib/issues/52",
+    "title": "[bug] incorrect segmentation of single-letter markers within sentences",
+    "labels": ["bug", "good first issue", "edge-cases"],
+    "why_selected": "Clear reproduction, expected output, and likely localized parser/test change. Good easy agent benchmark."
+  },
+  {
+    "id": "trushell-31",
+    "difficulty": "easy",
+    "upstream_repo": "TruFoundation/TruShell",
+    "fork_repo": "alejandro-ao/TruShell",
+    "fork_url": "https://github.com/alejandro-ao/TruShell",
+    "issue_number": 31,
+    "issue_url": "https://github.com/TruFoundation/TruShell/issues/31",
+    "title": "Fix Sound Packaging Path in pyproject.toml",
+    "labels": ["bug", "good first issue"],
+    "why_selected": "Very small packaging path fix with explicit acceptance criteria. Useful sanity check for PR workflow."
+  },
+  {
+    "id": "aedos-5",
+    "difficulty": "medium",
+    "upstream_repo": "Aspect-Research/aedos",
+    "fork_repo": "alejandro-ao/aedos",
+    "fork_url": "https://github.com/alejandro-ao/aedos",
+    "issue_number": 5,
+    "issue_url": "https://github.com/Aspect-Research/aedos/issues/5",
+    "title": "Counting consonants correction fails",
+    "labels": ["bug", "good first issue"],
+    "why_selected": "Detailed trace and bug report, but likely requires understanding final answer synthesis logic. Good medium task."
+  },
+  {
+    "id": "scikit-fingerprints-609",
+    "difficulty": "medium",
+    "upstream_repo": "MLCIL/scikit-fingerprints",
+    "fork_repo": "alejandro-ao/scikit-fingerprints",
+    "fork_url": "https://github.com/alejandro-ao/scikit-fingerprints",
+    "issue_number": 609,
+    "issue_url": "https://github.com/MLCIL/scikit-fingerprints/issues/609",
+    "title": "`MolFromSDFTransformer` should set `conf_id`",
+    "labels": ["bug", "good first issue"],
+    "why_selected": "Concise expected behavior in a real package; likely needs a test and domain-specific object handling."
+  },
+  {
+    "id": "mellea-1219",
+    "difficulty": "easy",
+    "upstream_repo": "generative-computing/mellea",
+    "fork_repo": "alejandro-ao/mellea",
+    "fork_url": "https://github.com/alejandro-ao/mellea",
+    "issue_number": 1219,
+    "issue_url": "https://github.com/generative-computing/mellea/issues/1219",
+    "title": "fix(streaming): use public mot.cancelled property in streaming.py:437",
+    "labels": ["bug", "good first issue", "area/streaming"],
+    "why_selected": "Explicit one-line fix and acceptance criteria. Good for measuring overhead/cost on a trivial task."
+  },
+  {
+    "id": "codegraphcontext-1095",
+    "difficulty": "medium",
+    "upstream_repo": "CodeGraphContext/CodeGraphContext",
+    "fork_repo": "alejandro-ao/CodeGraphContext",
+    "fork_url": "https://github.com/alejandro-ao/CodeGraphContext",
+    "issue_number": 1095,
+    "issue_url": "https://github.com/CodeGraphContext/CodeGraphContext/issues/1095",
+    "title": "Parser: Limit Maximum AST Recursion Depth",
+    "labels": ["bug", "good first issue", "GSSoC26", "PythonDevs"],
+    "why_selected": "Clear parser reliability task with a specific file and acceptance criteria; more implementation judgment than one-line fixes."
+  }
+]
