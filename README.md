@@ -1,129 +1,312 @@
 # duobench
 
-Cost-efficiency benchmark for **planner × implementer** LLM duos, run over Pi RPC.
+Benchmark **planner × implementer** AI coding-agent duos on real GitHub issue → pull request workflows.
 
-Duobench takes one GitHub issue, runs each planner model to inspect the issue/repository and produce a handoff plan, then runs every planner × implementer pairing. Each implementer works in an isolated git worktree and is responsible for fetching the issue with `gh`, making changes, committing, pushing, opening a PR, and returning only the PR id. A judge panel reviews each PR with local git/`gh` access. Cost is captured per phase, including cached-token usage when Pi reports it; charts show the cost/quality trade-off. Nothing about "challenger vs flagship" is baked in — you measure whatever combinations you list in config.
+`duobench` runs every planner/implementer pairing you choose through [Pi](https://pi.dev) RPC:
 
-Real runs require the `gh` CLI installed/authenticated and a git repository with push/PR permissions.
+1. A planner model inspects a GitHub issue and the local repo, then writes a handoff plan.
+2. An implementer model receives the issue + plan in an isolated git worktree.
+3. The implementer fixes the issue, commits, pushes, opens a PR, and returns only the PR id.
+4. Judge models inspect the issue and PR with `git`/`gh` and score the result.
+5. The harness writes transcripts, costs, charts, CSVs, and an HTML report.
 
-See `DESIGN.md` for the full design rationale.
+The goal is to measure which model pairings produce the best quality-per-dollar for realistic software engineering work.
+
+> **Important:** real runs create branches and pull requests. Use a repo where that is expected, and consider starting with one condition and one trial.
+
+---
+
+## Requirements
+
+For real runs you need:
+
+- Python 3.11+
+- [`uv`](https://docs.astral.sh/uv/)
+- `git`
+- GitHub CLI: [`gh`](https://cli.github.com/)
+- authenticated `gh` with permission to read issues and create PRs
+- `pi` on PATH, with the model providers in your config available
+- a clean-ish local checkout of the GitHub repo you want to benchmark
+
+Check basics:
+
+```bash
+gh auth status
+pi --version
+git status
+```
+
+---
 
 ## Install
 
-From a checkout:
+From this checkout:
 
 ```bash
 uv sync
 uv run playwright install chromium
 ```
 
-As a standalone uv tool from PyPI:
+As a uv tool from PyPI:
 
 ```bash
 uv tool install duobench
 uvx playwright install chromium
 ```
 
-Or directly from GitHub before a PyPI release:
+Or directly from GitHub:
 
 ```bash
 uv tool install git+https://github.com/alejandro-ao/agent-synergy-eval.git
 uvx playwright install chromium
 ```
 
-Requires the `pi` binary on PATH (`pi --mode rpc`) with the providers you reference in
-config already registered.
+`playwright` is still used by dry-run/demo artifacts and legacy report checks.
 
-## Quick start for a cloud agent
+---
 
-If you are handing this repo to an agent or remote runner, tell it to run **one condition
-first** and return the generated `report.html`.
+## Quick Start
+
+### 1. Validate without spending model/API tokens
 
 ```bash
-# 1. Install deps
-uv sync
-uv run playwright install chromium
-
-# 2. Validate local wiring without API/model spend
-uv run duobench run --dry-run --conditions gpt-x-kimi --trials 1 --no-live
-
-# 3. Run one real GPT-planner × Kimi-implementer trial
-uv run duobench run \
-  --conditions gpt-x-kimi \
-  --trials 1 \
-  --no-live \
-  --plan-timeout 600 \
-  --impl-timeout 1800 \
-  --judge-timeout 300
+uv run duobench --dry-run --models kimi-k2.6,gpt-5.5 --trials 1 --no-live
 ```
 
-Expected final artifact:
+Open the generated report:
 
 ```bash
 open runs/<timestamp>/report.html
 ```
 
-For a copy/paste prompt you can give to a cloud coding agent, see
-[`AGENT_RUN_PROMPT.md`](AGENT_RUN_PROMPT.md).
-
-## Run
+### 2. Run one real condition first
 
 ```bash
-# preview the full matrix presentation with synthetic plans/builds/scores (no API spend)
-uv run duobench run --dry-run --models kimi-k2.6,gpt-5.5 --trials 1
-
-# simplest real benchmark: every model plans once, then every planner×implementer pair opens a PR
-uv run duobench run --issue https://github.com/org/repo/issues/123 --models kimi-k2.6,gpt-5.5,claude-opus-4.8 --trials 1
-
-# shorthand form with a GitHub issue
-uv run duobench --issue https://github.com/org/repo/issues/123 --models kimi-k2.6,gpt-5.5 --trials 1
-
-# rectangular matrix: only these planners crossed with only these implementers
-uv run duobench run --issue https://github.com/org/repo/issues/123 --planners kimi-k2.6,gpt-5.5 --implementers kimi-k2.6 --trials 1
-
-# legacy/manual mode: one explicit condition from conditions.yaml
-uv run duobench run --issue https://github.com/org/repo/issues/123 --conditions gpt-solo --trials 1
-
-# the whole conditions.yaml config, 3 trials each (for error bars)
-uv run duobench run --issue https://github.com/org/repo/issues/123 --trials 3
+uv run duobench \
+  --issue https://github.com/org/repo/issues/123 \
+  --conditions gpt-x-kimi \
+  --trials 1 \
+  --no-live
 ```
 
-### Flags
+### 3. Run a full model matrix
 
-| Flag | Default | Meaning |
-|------|---------|---------|
-| `--trials N` | `1` | Trials per condition (variance / error bars) |
-| `--issue URL` | required for real runs | GitHub issue URL/reference for agents to inspect with `gh` |
-| `--conditions a,b,c` | all from config | Comma-separated condition ids to run from `conditions.yaml` |
-| `--models a,b,c` | off | Generate a full planner×implementer matrix from model keys (N plans, N² builds per trial) |
-| `--planners a,b` | off | Planner keys for a rectangular matrix; use with `--implementers` |
-| `--implementers a,b` | off | Implementer keys for a rectangular matrix; use with `--planners` |
-| `--parallel auto\|all\|N` | `auto` | Planner/build concurrency (`auto` caps at 2 workers; `all` runs every job in each phase; use `1` for serial) |
-| `--pi-sessions` / `--no-pi-sessions` | on | Save real Pi RPC sessions in Pi's default session store with descriptive names |
-| `--dry-run` | off | Stub all model calls with synthetic plans, builds, costs, transcripts, and varied judge scores |
-| `--out DIR` | `runs` | Output root |
-| `--models-config` | `config/models.yaml` | Model registry |
-| `--conditions-config` | `config/conditions.yaml` | Combinations |
-| `--plan-timeout` | `600` | Planner wall-clock (s) |
-| `--impl-timeout` | `1800` | Implementer wall-clock (s) |
-| `--judge-timeout` | `300` | Per-judge wall-clock (s) |
-| `--live` / `--no-live` | auto | Force-enable/disable the Rich live dashboard |
+```bash
+uv run duobench \
+  --issue https://github.com/org/repo/issues/123 \
+  --models kimi-k2.6,gpt-5.5,claude-opus-4.8 \
+  --trials 1
+```
 
-## Running in tmux / long-running environments
+With three models and one trial, this runs:
 
-Real runs can take a while. For a remote machine, prefer `tmux` and plain logs:
+- 3 planner sessions
+- 9 implementer sessions / PR attempts
+- judge panel over every PR
+
+---
+
+## Common Commands
+
+```bash
+# Full planner × implementer matrix from model keys
+uv run duobench --issue https://github.com/org/repo/issues/123 --models kimi-k2.6,gpt-5.5 --trials 1
+
+# Rectangular matrix: selected planners crossed with selected implementers
+uv run duobench --issue https://github.com/org/repo/issues/123 --planners kimi-k2.6,gpt-5.5 --implementers kimi-k2.6 --trials 1
+
+# Explicit conditions from config/conditions.yaml
+uv run duobench --issue https://github.com/org/repo/issues/123 --conditions gpt-x-kimi --trials 1
+
+# Serial execution, useful to avoid PR/branch chaos while testing
+uv run duobench --issue https://github.com/org/repo/issues/123 --models kimi-k2.6,gpt-5.5 --parallel 1 --trials 1
+
+# Regenerate an HTML report from an existing run
+uv run duobench report runs/<timestamp>
+```
+
+`duobench ...` is shorthand for `duobench run ...`.
+
+---
+
+## CLI Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--issue URL` | required for real runs | GitHub issue URL/reference. Agents fetch it themselves with `gh`. |
+| `--models a,b,c` | off | Generate full planner × implementer matrix. |
+| `--planners a,b` | off | Planner model keys for rectangular matrix. Use with `--implementers`. |
+| `--implementers a,b` | off | Implementer model keys for rectangular matrix. Use with `--planners`. |
+| `--conditions a,b` | all config conditions | Run named condition IDs from `conditions.yaml`. |
+| `--trials N` | `1` | Trials per condition. |
+| `--parallel auto\|all\|N` | `auto` | Planner/implementation concurrency. Use `1` for serial. |
+| `--dry-run` | off | Stub model calls and generate synthetic outputs. |
+| `--out DIR` | `runs` | Output directory root. |
+| `--models-config PATH` | `config/models.yaml` | Model registry path. |
+| `--conditions-config PATH` | `config/conditions.yaml` | Condition preset path. |
+| `--plan-timeout SEC` | `600` | Planner wall-clock timeout. |
+| `--impl-timeout SEC` | `1800` | Implementer wall-clock timeout. |
+| `--judge-timeout SEC` | `300` | Per-judge timeout. |
+| `--pi-sessions` / `--no-pi-sessions` | on | Save Pi sessions in Pi's normal session store. |
+| `--live` / `--no-live` | auto | Rich live dashboard. |
+
+---
+
+## Configuration
+
+Duobench uses two YAML files.
+
+### `config/models.yaml`
+
+Model registry plus judge panel:
+
+```yaml
+models:
+  kimi-k2.6:
+    provider: kimi-coding
+    model_id: kimi-for-coding
+    thinking: high
+    pricing:
+      input: 0.95
+      output: 4.00
+
+  gpt-5.5:
+    provider: openai-codex
+    model_id: gpt-5.5
+    thinking: off
+    pricing:
+      input: 5.00
+      output: 30.00
+
+judges:
+  - kimi-k2.6
+  - gpt-5.5
+```
+
+Notes:
+
+- `provider` and `model_id` are passed directly to Pi RPC `set_model`.
+- `thinking` is optional: `off|minimal|low|medium|high|xhigh`.
+- `pricing` is dollars per million tokens.
+- Optional `cache_read` and `cache_write` rates are supported.
+
+### `config/conditions.yaml`
+
+Named manual pairings:
+
+```yaml
+conditions:
+  - id: kimi-solo
+    planner: kimi-k2.6
+    implementer: kimi-k2.6
+
+  - id: gpt-x-kimi
+    planner: gpt-5.5
+    implementer: kimi-k2.6
+```
+
+For most experiments, use `--models` instead of manually listing every pair.
+
+---
+
+## What Agents Are Asked To Do
+
+### Planner
+
+The planner receives the GitHub issue URL and is told to:
+
+- inspect the issue using `gh`
+- inspect the local repository
+- produce a concise implementation plan
+- avoid modifying files, branches, commits, pushes, or PRs
+
+### Implementer
+
+The implementer receives the issue URL and planner handoff plan. It is told to:
+
+- inspect the issue with `gh`
+- create a branch in its isolated worktree
+- make the code changes
+- run appropriate checks
+- commit and push
+- open a PR
+- return only the PR id or PR URL
+
+### Judge
+
+Each judge receives the issue URL, PR id, planner handoff, and harness metadata. It can inspect the PR with `git` and `gh`, but must not mutate anything.
+
+Judges score:
+
+| Dimension | Meaning |
+|-----------|---------|
+| `task_completion` | Does the PR address the issue and avoid unrelated work? |
+| `correctness` | Is the behavior likely correct and robust? |
+| `code_quality` | Are changes maintainable, idiomatic, and appropriately scoped? |
+| `verification` | Were meaningful tests/checks included or run? |
+
+`cost_efficiency` is computed by the harness as quality divided by cost.
+
+---
+
+## Output Layout
+
+Each run writes to `runs/<timestamp>/`:
+
+```text
+report.html
+results.json
+results/
+  leaderboard.png / leaderboard.csv
+  dimension-radar.png / dimensions.csv
+  cost-vs-quality.png / cost-vs-quality.csv
+  self-bias-matrix.png / self-bias.csv
+shared-plans/<planner>/trial-<n>/
+  plan.md
+  shared-plan.json
+  planner-transcript.json
+  planner-events.jsonl
+conditions/<condition-id>/trial-<n>/
+  plan.md
+  worktree/
+  verify.json
+  trial.json
+  implementer-transcript.json
+  implementer-events.jsonl
+  judge-transcripts/
+```
+
+The final CLI output prints a file URL for `report.html`.
+
+---
+
+## Pi Sessions
+
+Real runs save Pi sessions by default, so you can inspect planner, implementer, and judge conversations in Pi's normal session browser/store.
+
+Disable this with:
+
+```bash
+uv run duobench --issue https://github.com/org/repo/issues/123 --models kimi-k2.6 --no-pi-sessions
+```
+
+Dry runs never create Pi sessions.
+
+---
+
+## Running Long Benchmarks
+
+Use `tmux` and `--no-live` for remote machines:
 
 ```bash
 tmux new-session -d -s duobench \
-  'cd /path/to/agent-synergy-eval && \
-   PYTHONUNBUFFERED=1 uv run duobench run \
+  'cd /path/to/repo && \
+   PYTHONUNBUFFERED=1 uv run duobench \
      --issue https://github.com/org/repo/issues/123 \
-     --conditions gpt-x-kimi \
+     --models kimi-k2.6,gpt-5.5 \
      --trials 1 \
+     --parallel 1 \
      --no-live \
-     --plan-timeout 600 \
-     --impl-timeout 1800 \
-     --judge-timeout 300 \
      2>&1 | tee /tmp/duobench.log'
 ```
 
@@ -131,147 +314,52 @@ Monitor:
 
 ```bash
 tmux attach -t duobench
-# detach safely with Ctrl-b, then d
 tail -f /tmp/duobench.log
 ```
 
-## Configuration
+---
 
-Two flat files, no tiers. For the common case, list models once in `models.yaml` and use
-`--models` to generate the full planner×implementer matrix. `conditions.yaml` remains a
-manual preset file for hand-picked subsets.
+## Safety Tips
 
-**`config/models.yaml`** — registry + judge panel:
+- Start with `--dry-run`.
+- Start real runs with `--conditions one-condition --trials 1`.
+- Use `--parallel 1` until you are comfortable with branch/PR behavior.
+- Run against a test repository or issue first.
+- Expect one PR per implementer attempt.
+- Judges are instructed not to mutate PRs, but implementers intentionally do.
 
-```yaml
-models:
-  kimi-k2.6:
-    provider: kimi-coding        # Pi provider id
-    model_id: kimi-for-coding    # Pi model id
-    thinking: high               # optional Pi thinking level: off|minimal|low|medium|high|xhigh
-    pricing: { input: 0.95, output: 4.00 }   # $/MTok; optional cache_read/cache_write supported
-  gpt-5.5:
-    provider: openai-codex
-    model_id: gpt-5.5
-    thinking: off
-    pricing: { input: 5.00, output: 30.00 }
-judges:
-  - kimi-k2.6
-  - gpt-5.5
-```
+---
 
-**`config/conditions.yaml`** — optional manual combinations (`planner`/`implementer` are keys into `models`):
+## Troubleshooting
 
-```yaml
-conditions:
-  - { id: kimi-solo,  planner: kimi-k2.6, implementer: kimi-k2.6 }
-  - { id: gpt-x-kimi, planner: gpt-5.5,   implementer: kimi-k2.6 }
-```
+### `--issue is required`
 
-To benchmark a different lineup (e.g. DeepSeek × MiniMax), add the models to
-`models.yaml`, then run `duobench run --models deepseek,minimax,...`. Config is validated
-up front: any planner/implementer/judge that isn't a registered model key fails fast before
-any model is called. If `thinking` is set, duobench sends Pi RPC
-`set_thinking_level` immediately after `set_model` for planner, implementer, and judge
-sessions.
-
-## Live CLI
-
-When attached to an interactive terminal, `duobench run` shows a Rich live dashboard with
-current phase, active planner/build/judge jobs, elapsed time, condition progress,
-event/message/tool-call counts, the latest tool call, tokens, cache tokens, configured
-cost, and Pi-reported cost. Use `--no-live` for plain logs or `--live` to force it on.
-
-## Previewing result presentation
-
-Use dry-run matrix mode to inspect the exact report/charts/leaderboard shape without model
-spend:
+Real runs require a GitHub issue:
 
 ```bash
-uv run duobench run --dry-run --models kimi-k2.6,gpt-5.5,claude-opus-4.8 --trials 1 --no-live
-open runs/<timestamp>/report.html
+uv run duobench --issue https://github.com/org/repo/issues/123 --models kimi-k2.6
 ```
 
-Dry-run writes synthetic shared plans, placeholder build artifacts, transcripts, non-zero
-configured costs from `models.yaml` pricing, varied judge scores, `results.json`, chart CSVs,
-PNGs, and the same `report.html` a real run writes.
+### `gh CLI is required`
 
-## Pi sessions
-
-For real runs, duobench saves each planner, implementer, and judge Pi RPC session in Pi's
-default session store (normally under `~/.pi/agent/sessions/`) so you can inspect them with
-Pi's own session UI. Sessions are named like:
-
-```text
-duobench minidesk 2026-06-06T19-05-24 planner kimi-k2.6 trial-0
-duobench minidesk 2026-06-06T19-05-24 implementer gpt-x-kimi kimi-k2.6 trial-0
-duobench minidesk 2026-06-06T19-05-24 judge gpt-x-kimi panel trial-0 judge=gpt-5.5
-```
-
-Use `--no-pi-sessions` to disable Pi session persistence. Dry runs never create Pi sessions.
-Duobench still writes its own transcripts/events under the timestamped run directory.
-
-## Outputs
-
-By default, each run writes canonical outputs to the current working directory under
-`runs/<timestamp>/`. Use `--out DIR` to choose a different output root. Runs do not
-overwrite top-level `./results/`; the CLI prints the run directory, results directory,
-`results.json`, and clickable `report.html` file URI at the end.
-
-When installed as a uv tool, `duobench` first looks for local `config/` and `prompts/`
-files in the current working directory. If they are absent, it uses packaged defaults, so
-you can run it from an empty experiment directory and keep outputs/config separate from the
-source checkout.
-
-Within a run, execution is deliberately two-stage and simple: all unique planner samples
-run first, keyed by `(planner, trial)`, then all planner×implementer PR attempts run from
-those plans. For `--models a,b,c --trials 1`, that means 3 planner runs followed by 9
-implementation/PR runs. Condition-level cost still includes the copied planner cost for
-fair comparisons. Planner agents get local read-only Pi tools (`read`, `grep`, `find`,
-`ls`, `bash`) so they can explore the repository and inspect the issue with `gh`.
-Implementers run in isolated git worktrees and must create branches, commits, pushes, and
-PRs themselves.
-
-Planner jobs and condition implementation/PR jobs run with bounded concurrency by default
-(`--parallel auto`, currently up to 2 workers). Use `--parallel all` to launch every job in
-each phase concurrently, `--parallel 1` for fully serial runs, or `--parallel N` to set an
-explicit global cap. Judging remains serial for now.
-
-Each run writes `runs/<timestamp>/`:
-
-```
-report.html       visual run report: PR metadata, agent threads, timing/tokens/cost
-shared-plans/<planner>/trial-<n>/
-  plan.md                    shared planner output used by matching conditions
-  shared-plan.json           planner/cost/source metadata
-conditions/<id>/trial-<n>/
-  plan.md                    planner output (copied handoff artifact)
-  planner-transcript.json    raw planner thread + timing/token/cost stats
-  planner-events.jsonl       raw Pi RPC events for debugging/live UI adaptation
-  implementer-transcript.json raw implementer turns + tool/message stats
-  implementer-events.jsonl   raw Pi RPC events from the implementer session
-  judge-transcripts/         one raw judge thread per judge model (+ *.events.jsonl)
-  worktree/                  isolated git worktree used by the implementer
-  verify.json                PR/worktree metadata
-  trial.json                 record + judge meta/scores
-results.json                 aggregated scores
-results/                     leaderboard, dimension-radar, cost-vs-quality, self-bias (PNG + CSV)
-```
-
-Regenerate a report for an existing run:
+Install and authenticate GitHub CLI:
 
 ```bash
-uv run duobench report runs/<timestamp>
+gh auth login
+gh auth status
 ```
 
-## Scoring
+### Pi cannot find a model
 
-Judges score task-agnostic dimensions 1–10 (`task_completion`, `correctness`,
-`code_quality`, `verification`), averaged across the panel. The judge receives the GitHub
-issue URL, planner handoff, implementer-returned PR id, and harness metadata. The judge
-uses local git and `gh` to inspect the issue and PR. `cost_efficiency` is computed
-objectively (quality ÷ $) — not judged. A self-bias matrix shows each judge's score per PR
-to surface a model favoring its own work.
+Check `config/models.yaml`. `provider` and `model_id` must match what your Pi installation knows.
 
-Judges use local git and `gh` to inspect the issue and PR. They should not comment, review,
-merge, close, push, or otherwise mutate the PR.
+### Too many branches/PRs
+
+Use fewer models, fewer trials, explicit `--conditions`, and `--parallel 1`.
+
+---
+
+## Design Docs
+
+- [`DESIGN.md`](DESIGN.md) — design rationale
+- [`.exploration/`](.exploration/) — architecture walkthrough generated for this codebase
