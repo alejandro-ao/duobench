@@ -755,9 +755,10 @@ def _dry_run_judge_scores(cfg: Config, rec: TrialRecord) -> list[JudgeScore]:
     planner_q = _model_quality_hint(rec.planner)
     implementer_q = _model_quality_hint(rec.implementer)
     base = {
-        "architecture": 0.72 * planner_q + 0.28 * implementer_q,
-        "correctness": 0.22 * planner_q + 0.78 * implementer_q,
-        "visual_ux": 0.15 * planner_q + 0.85 * implementer_q,
+        "task_completion": 0.45 * planner_q + 0.55 * implementer_q,
+        "correctness": 0.25 * planner_q + 0.75 * implementer_q,
+        "code_quality": 0.35 * planner_q + 0.65 * implementer_q,
+        "verification": 0.20 * planner_q + 0.80 * implementer_q,
     }
     scores: list[JudgeScore] = []
     for judge_key in cfg.judges:
@@ -767,9 +768,10 @@ def _dry_run_judge_scores(cfg: Config, rec: TrialRecord) -> list[JudgeScore]:
         scores.append(
             JudgeScore(
                 judge=judge_key,
-                architecture=_clamp_score(base["architecture"] + jitter + bias),
+                task_completion=_clamp_score(base["task_completion"] + jitter + bias),
                 correctness=_clamp_score(base["correctness"] + jitter + bias),
-                visual_ux=_clamp_score(base["visual_ux"] + jitter + bias),
+                code_quality=_clamp_score(base["code_quality"] + jitter + bias),
+                verification=_clamp_score(base["verification"] + jitter + bias),
                 notes="synthetic dry-run score; no judge model was called",
             )
         )
@@ -791,16 +793,25 @@ def _write_dry_run_judge_transcripts(
         cost = compute_cost(usage, model)
         assistant_text = json.dumps(
             {
-                "architecture": score.architecture,
+                "task_completion": score.task_completion,
                 "correctness": score.correctness,
-                "visual_ux": score.visual_ux,
+                "code_quality": score.code_quality,
+                "verification": score.verification,
                 "notes": score.notes,
             }
+        )
+        rendered_prompt = (
+            judge_prompt
+            .replace("{user_task}", DEFAULT_USER_PROMPT)
+            .replace("{plan}", "[dry-run synthetic plan]")
+            .replace("{solution_diff}", "[dry-run synthetic solution diff]")
+            .replace("{smoke_results}", "[dry-run synthetic smoke results]")
+            .replace("{source}", "[dry-run synthetic source]")
         )
         _write_fake_transcript(
             phase="judge",
             model=model,
-            prompt=judge_prompt,
+            prompt=rendered_prompt,
             assistant_text=assistant_text,
             usage=usage,
             cost=cost,
@@ -973,7 +984,10 @@ def _main() -> None:
         trial_dir = Path(meta["build_dir"]).parent
         scores = judge_panel(
             cfg, prompts["judge"], Path(meta["build_dir"]),
-            meta["smoke_summary"], meta["screenshots"], timeout=args.judge_timeout,
+            meta["smoke_summary"], meta["screenshots"],
+            user_task=_user_prompt_from(prompts),
+            plan=(trial_dir / "plan.md").read_text() if (trial_dir / "plan.md").exists() else "",
+            timeout=args.judge_timeout,
             transcripts_dir=trial_dir / "judge-transcripts",
             persist_pi_session=args.pi_sessions,
             session_name_prefix=_pi_session_name(run_dir.name, "judge", "panel", trial=rec.trial, condition_id=rec.condition_id),

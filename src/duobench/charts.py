@@ -44,7 +44,7 @@ def generate_charts(results: dict, results_dir: Path) -> list[Path]:
 
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.barh(o_cids[::-1], o_q[::-1], xerr=o_std[::-1], color="#4c78a8", capsize=4)
-    ax.set_xlabel("Average quality (mean of architecture, correctness, visual/UX)")
+    ax.set_xlabel("Average quality (mean of judged dimensions)")
     ax.set_title("Leaderboard — planner×implementer conditions")
     ax.set_xlim(0, 10)
     fig.tight_layout()

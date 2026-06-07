@@ -267,8 +267,12 @@ uv run duobench report runs/<timestamp>
 
 ## Scoring
 
-Judges score three dimensions 1–10 (`architecture`, `correctness`, `visual_ux`), averaged
-across the panel. `cost_efficiency` is computed objectively (quality ÷ $) — not judged. A
-self-bias matrix shows each judge's score per build to surface a model favoring its own work.
+Judges score task-agnostic dimensions 1–10 (`task_completion`, `correctness`,
+`code_quality`, `verification`), averaged across the panel. The judge receives the user
+task, planner handoff, implementation diff/status or source snapshot, verification output,
+and screenshots when available. `cost_efficiency` is computed objectively (quality ÷ $) —
+not judged. A self-bias matrix shows each judge's score per build to surface a model
+favoring its own work.
 
-Smoke test "boots OK" = desktop + taskbar render, no fatal console error, and ≥3 apps launch.
+For the default MiniDesk task, smoke test "boots OK" = desktop + taskbar render, no fatal
+console error, and ≥3 apps launch.

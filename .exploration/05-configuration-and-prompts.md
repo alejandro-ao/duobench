@@ -152,14 +152,17 @@ It tells the implementer to use the plan as guidance but verify it independently
 
 ### Judge prompt
 
-The judge prompt uses source and smoke-test placeholders:
+The judge prompt is task-agnostic and uses these placeholders:
 
 ```text
+{user_task}
+{plan}
+{solution_diff}
 {source}
 {smoke_results}
 ```
 
-`judge.py` replaces those before sending the prompt to each judge model.
+`judge.py` replaces those before sending the prompt to each judge model. `solution_diff` is a git status/diff when available; otherwise it explains that no git repository was detected and falls back to the source snapshot.
 
 ## Prompt Formatting Code
 

@@ -17,7 +17,7 @@ build/ files
   ↓
 Playwright verification + screenshots
   ↓
-Judge prompt bundle: source + smoke summary + screenshots
+Judge prompt bundle: user task + plan + diff/status + source + smoke summary + screenshots
   ↓
 per-judge scores
   ↓
@@ -93,12 +93,12 @@ The result is written to `verify.json` and summarized for judges with `VerifyRes
 
 ## Judging
 
-`src/duobench/judge.py` collects source files from the build directory, combines them with smoke-test results, and sends them to every configured judge model.
+`src/duobench/judge.py` collects source files and a git diff/status when available, combines them with the user task, planner handoff, smoke-test results, and screenshots, then sends that bundle to every configured judge model.
 
 The judged dimensions are defined in `DIMENSIONS`:
 
 ```python
-DIMENSIONS = ("architecture", "correctness", "visual_ux")
+DIMENSIONS = ("task_completion", "correctness", "code_quality", "verification")
 ```
 
 Each judge returns integer scores from 1 to 10. `average_dimensions()` averages valid judge scores for the trial record.
@@ -111,7 +111,7 @@ Important computed fields:
 
 | Field | Meaning |
 |-------|---------|
-| `dimensions` | Mean architecture/correctness/visual_ux scores |
+| `dimensions` | Mean task_completion/correctness/code_quality/verification scores |
 | `quality` | Mean of the three judged dimensions |
 | `cost_usd` | Mean planner + implementer cost |
 | `cost_efficiency` | `quality / cost_usd` |

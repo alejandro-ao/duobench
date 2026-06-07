@@ -120,7 +120,7 @@ def generate_report(run_dir: Path) -> Path:
             body.append(f"<p class='muted'>benchmark: <code>{html.escape(str(benchmark.get('label')))}</code></p>")
         if build_index.exists():
             rel = _rel(run_dir, build_index)
-            body.append(f"<p><a href='{rel}' target='_blank'>Open generated WebOS in a new tab</a></p><iframe class='build-frame' src='{rel}'></iframe>")
+            body.append(f"<p><a href='{rel}' target='_blank'>Open generated build in a new tab</a></p><iframe class='build-frame' src='{rel}'></iframe>")
         shots = meta.get("screenshots") or verify.get("screenshots") or []
         if shots:
             body.append("<h3>Screenshots</h3><div class='shots'>" + "".join(f"<a href='{_rel(run_dir,s)}' target='_blank'><img src='{_rel(run_dir,s)}'></a>" for s in shots) + "</div>")

@@ -8,7 +8,7 @@ results.json shape:
   "conditions": {
      "<cond_id>": {
         "planner": str, "implementer": str,
-        "dimensions": {"architecture": float, "correctness": float, "visual_ux": float},
+        "dimensions": {"task_completion": float, "correctness": float, "code_quality": float, "verification": float},
         "dimensions_std": {...},                 # across trials (0 if single trial)
         "quality": float,                        # mean of 3 judged dims
         "quality_std": float,
@@ -17,7 +17,7 @@ results.json shape:
         "trials": int,
      }, ...
   },
-  "self_bias": { "<judge_key>": { "<cond_id>": float(architecture+correctness+visual_ux avg), ... } },
+  "self_bias": { "<judge_key>": { "<cond_id>": float(avg judged dimensions), ... } },
   "judges": [ ... ],
 }
 """

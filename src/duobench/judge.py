@@ -1,11 +1,11 @@
-"""Judge phase: a configurable panel scores every build on 3 dimensions.
+"""Judge phase: a configurable panel scores every solution on task-agnostic dimensions.
 
-Each judge model scores architecture / correctness / visual_ux (1-10) as strict JSON.
-Cost efficiency is NOT judged — it's computed objectively in results aggregation.
+Each judge model scores task_completion / correctness / code_quality / verification
+(1-10) as strict JSON. Cost efficiency is NOT judged — it's computed objectively in
+results aggregation.
 
-Inputs per build: concatenated source code + smoke-test summary + screenshots (passed as
-images when the Pi RPC prompt supports them; otherwise the judge scores visual_ux
-conservatively from CSS, as instructed in the prompt).
+Inputs per build: original user task, planner handoff plan, implementation diff/status,
+concatenated source code, smoke-test summary, and screenshots when available.
 
 Scores are averaged across the panel. Raw per-judge scores are kept so a judge×build
 self-bias matrix can be plotted.
@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,27 +26,33 @@ from duobench.cost import compute_cost
 from duobench.pi_rpc import PiRpcError, PiSession
 from duobench.transcript import new_transcript
 
-DIMENSIONS = ("architecture", "correctness", "visual_ux")
+DIMENSIONS = ("task_completion", "correctness", "code_quality", "verification")
 _MAX_SOURCE_CHARS = 120_000           # cap concatenated source to stay within context
-_SOURCE_EXTS = {".html", ".css", ".js", ".mjs", ".json", ".md"}
+_SOURCE_EXTS = {
+    ".html", ".css", ".js", ".mjs", ".jsx", ".ts", ".tsx",
+    ".py", ".go", ".rs", ".java", ".rb", ".php", ".sh",
+    ".json", ".yaml", ".yml", ".toml", ".md",
+}
 _SKIP_DIRS = {"node_modules", ".git", "screenshots"}
 
 
 @dataclass
 class JudgeScore:
     judge: str                        # model key
-    architecture: int
+    task_completion: int
     correctness: int
-    visual_ux: int
+    code_quality: int
+    verification: int
     notes: str = ""
     error: str | None = None
 
     def to_dict(self) -> dict:
         return {
             "judge": self.judge,
-            "architecture": self.architecture,
+            "task_completion": self.task_completion,
             "correctness": self.correctness,
-            "visual_ux": self.visual_ux,
+            "code_quality": self.code_quality,
+            "verification": self.verification,
             "notes": self.notes,
             "error": self.error,
         }
@@ -73,6 +80,53 @@ def collect_source(build_dir: Path) -> str:
     return "".join(parts) if parts else "[no source files found]"
 
 
+def collect_solution_diff(work_dir: Path, *, max_chars: int = 120_000) -> str:
+    """Return git status/diff when available, otherwise a source snapshot note."""
+    def run_git(args: list[str]) -> str | None:
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(work_dir), *args],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=20,
+            )
+        except Exception:
+            return None
+        if proc.returncode != 0:
+            return None
+        return proc.stdout.strip()
+
+    top = run_git(["rev-parse", "--show-toplevel"])
+    if top:
+        status = run_git(["status", "--short"]) or "[clean]"
+        diff_stat = run_git(["diff", "--stat", "--", "."]) or ""
+        diff = run_git(["diff", "--", "."]) or ""
+        untracked = [line[3:] for line in status.splitlines() if line.startswith("?? ")]
+        untracked_parts: list[str] = []
+        for rel in untracked[:20]:
+            path = work_dir / rel
+            if path.is_file() and path.suffix.lower() in _SOURCE_EXTS:
+                try:
+                    text = path.read_text(errors="replace")
+                except Exception:
+                    continue
+                untracked_parts.append(f"\n===== UNTRACKED FILE: {rel} =====\n{text}\n")
+        body = (
+            f"Git status:\n{status}\n\n"
+            f"Git diff stat:\n{diff_stat or '[no tracked-file diff]'}\n\n"
+            f"Git diff:\n{diff or '[no tracked-file diff]'}\n"
+            f"{''.join(untracked_parts)}"
+        )
+    else:
+        body = (
+            "No git repository was detected for the implementation directory. "
+            "Evaluate the solution from the source snapshot below.\n\n"
+            f"Files:\n{collect_source(work_dir)}"
+        )
+    return body[:max_chars] + ("\n[...solution diff truncated...]" if len(body) > max_chars else "")
+
+
 def _encode_images(screenshots: list[str], limit: int = 5) -> list[dict]:
     imgs: list[dict] = []
     for sp in screenshots[:limit]:
@@ -91,11 +145,11 @@ def _parse_scores(text: str, judge_key: str) -> JudgeScore:
     # Extract the first JSON object from the response.
     m = re.search(r"\{.*\}", text, re.DOTALL)
     if not m:
-        return JudgeScore(judge_key, 0, 0, 0, error=f"no JSON in response: {text[:120]}")
+        return JudgeScore(judge_key, 0, 0, 0, 0, error=f"no JSON in response: {text[:120]}")
     try:
         obj = json.loads(m.group(0))
     except json.JSONDecodeError as e:
-        return JudgeScore(judge_key, 0, 0, 0, error=f"bad JSON: {e}")
+        return JudgeScore(judge_key, 0, 0, 0, 0, error=f"bad JSON: {e}")
 
     def clamp(v) -> int:
         try:
@@ -105,9 +159,10 @@ def _parse_scores(text: str, judge_key: str) -> JudgeScore:
 
     return JudgeScore(
         judge=judge_key,
-        architecture=clamp(obj.get("architecture")),
+        task_completion=clamp(obj.get("task_completion")),
         correctness=clamp(obj.get("correctness")),
-        visual_ux=clamp(obj.get("visual_ux")),
+        code_quality=clamp(obj.get("code_quality")),
+        verification=clamp(obj.get("verification")),
         notes=str(obj.get("notes", ""))[:500],
     )
 
@@ -120,6 +175,9 @@ def judge_build(
     smoke_summary: str,
     screenshots: list[str],
     *,
+    user_task: str,
+    plan: str,
+    solution_diff: str,
     timeout: float = 300.0,
     transcript_path: Path | None = None,
     persist_pi_session: bool = False,
@@ -128,6 +186,9 @@ def judge_build(
 ) -> JudgeScore:
     prompt = (
         judge_prompt_template
+        .replace("{user_task}", user_task)
+        .replace("{plan}", plan)
+        .replace("{solution_diff}", solution_diff)
         .replace("{smoke_results}", smoke_summary)
         .replace("{source}", source)
     )
@@ -175,7 +236,7 @@ def judge_build(
                 transcript.write(transcript_path)
             if ui:
                 ui.end_phase("error")
-            return JudgeScore(judge_key, 0, 0, 0, error=str(e))
+            return JudgeScore(judge_key, 0, 0, 0, 0, error=str(e))
         try:
             session_state = s.get_state()
         except Exception:
@@ -203,6 +264,9 @@ def judge_panel(
     smoke_summary: str,
     screenshots: list[str],
     *,
+    user_task: str = "",
+    plan: str = "",
+    solution_diff: str | None = None,
     timeout: float = 300.0,
     transcripts_dir: Path | None = None,
     persist_pi_session: bool = False,
@@ -211,6 +275,7 @@ def judge_panel(
 ) -> list[JudgeScore]:
     """Run every configured judge over one build."""
     source = collect_source(build_dir)
+    solution_diff = solution_diff if solution_diff is not None else collect_solution_diff(build_dir)
     scores: list[JudgeScore] = []
     for judge_key in cfg.judges:
         model = cfg.model(judge_key)
@@ -219,7 +284,11 @@ def judge_panel(
         scores.append(
             judge_build(
                 model, judge_key, judge_prompt_template,
-                source, smoke_summary, screenshots, timeout=timeout,
+                source, smoke_summary, screenshots,
+                user_task=user_task,
+                plan=plan,
+                solution_diff=solution_diff,
+                timeout=timeout,
                 transcript_path=transcript_path,
                 persist_pi_session=persist_pi_session,
                 session_name=session_name,
