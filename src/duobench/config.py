@@ -26,8 +26,12 @@ class Model:
     key: str
     provider: str
     model_id: str
-    pricing: Pricing
+    pricing: Pricing | None = None
     thinking_level: str | None = None
+
+    @property
+    def spec(self) -> str:
+        return self.model_id if not self.provider else self.key
 
 
 @dataclass(frozen=True)
@@ -43,8 +47,13 @@ class Config:
     judges: list[str]            # model keys
     conditions: list[Condition]
 
+    costs: dict[str, Pricing] | None = None
+
     def model(self, key: str) -> Model:
-        return self.models[key]
+        if key in self.models:
+            return self.models[key]
+        pricing = (self.costs or {}).get(key)
+        return Model(key=key, provider="", model_id=key, pricing=pricing)
 
 
 THINKING_LEVELS = {"off", "minimal", "low", "medium", "high", "xhigh"}
@@ -65,9 +74,30 @@ def _read_config_text(path: str | Path, default_name: str) -> str:
     raise ConfigError(f"config not found: {path}")
 
 
+def load_costs(costs_path: str | Path = "costs.yaml") -> dict[str, Pricing]:
+    path = Path(costs_path)
+    if not path.is_file():
+        return {}
+    raw = yaml.safe_load(path.read_text()) or {}
+    raw_models = raw.get("models", raw)
+    _require(isinstance(raw_models, dict), "costs.yaml must be a mapping or contain a 'models' mapping")
+    costs: dict[str, Pricing] = {}
+    for key, spec in raw_models.items():
+        _require(isinstance(spec, dict), f"cost '{key}': entry must be a mapping")
+        _require("input" in spec and "output" in spec, f"cost '{key}': missing input/output rates")
+        costs[str(key)] = Pricing(
+            input=float(spec["input"]),
+            output=float(spec["output"]),
+            cache_read=float(spec["cache_read"]) if "cache_read" in spec else None,
+            cache_write=float(spec["cache_write"]) if "cache_write" in spec else None,
+        )
+    return costs
+
+
 def load_config(
     models_path: str | Path = "config/models.yaml",
     conditions_path: str | Path = "config/conditions.yaml",
+    costs_path: str | Path = "costs.yaml",
 ) -> Config:
     """Load and validate both config files. Fails fast with a clear error.
 
@@ -76,6 +106,7 @@ def load_config(
     """
     models_raw = yaml.safe_load(_read_config_text(models_path, "models.yaml")) or {}
     conditions_raw = yaml.safe_load(_read_config_text(conditions_path, "conditions.yaml")) or {}
+    costs = load_costs(costs_path)
 
     # --- models ---
     raw_models = models_raw.get("models")
@@ -138,4 +169,4 @@ def load_config(
         _require(c["implementer"] in models, f"condition '{cid}': implementer '{c['implementer']}' not in models")
         conditions.append(Condition(id=cid, planner=str(c["planner"]), implementer=str(c["implementer"])))
 
-    return Config(models=models, judges=list(judges), conditions=conditions)
+    return Config(models=models, judges=list(judges), conditions=conditions, costs=costs)
