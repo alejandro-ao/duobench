@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib import resources
 from pathlib import Path
 
@@ -50,13 +50,43 @@ class Config:
     costs: dict[str, Pricing] | None = None
 
     def model(self, key: str) -> Model:
-        if key in self.models:
-            return self.models[key]
-        pricing = (self.costs or {}).get(key)
-        return Model(key=key, provider="", model_id=key, pricing=pricing)
+        # The CLI accepts Pi-style specs with an optional `:thinking` suffix
+        # (e.g. `kimi-coding/kimi-for-coding:high`). Split the suffix first,
+        # then look up the registry; the registry is keyed by the spec form
+        # the user originally wrote (full Pi spec OR short alias).
+        spec_key, _, suffix = key.partition(":")
+        cli_thinking = _validate_thinking(suffix) if suffix else None
+        if spec_key in self.models:
+            base = self.models[spec_key]
+            if cli_thinking is not None and cli_thinking != base.thinking_level:
+                return replace(base, key=key, thinking_level=cli_thinking)
+            return base if key == spec_key else replace(base, key=key)
+        # Fall back to interpreting the spec as `provider/model_id` (Pi's CLI form).
+        # A bare spec with no slash is treated as model_id only, leaving the
+        # provider empty so Pi can try to resolve it.
+        provider, _, model_id = spec_key.partition("/")
+        provider = provider if model_id else ""
+        pricing = (self.costs or {}).get(key) or (self.costs or {}).get(spec_key)
+        return Model(
+            key=key,
+            provider=provider,
+            model_id=model_id or spec_key,
+            pricing=pricing,
+            thinking_level=cli_thinking,
+        )
 
 
 THINKING_LEVELS = {"off", "minimal", "low", "medium", "high", "xhigh"}
+
+
+def _validate_thinking(value: str) -> str:
+    """Return the thinking level from a `:suffix`, raising ConfigError if invalid."""
+    level = value.strip().lower()
+    if level not in THINKING_LEVELS:
+        raise ConfigError(
+            f"unknown thinking level {value!r}; expected one of {', '.join(sorted(THINKING_LEVELS))}"
+        )
+    return level
 
 
 def _require(cond: bool, msg: str) -> None:
@@ -165,8 +195,26 @@ def load_config(
         cid = str(c["id"])
         _require(cid not in seen_ids, f"duplicate condition id: '{cid}'")
         seen_ids.add(cid)
-        _require(c["planner"] in models, f"condition '{cid}': planner '{c['planner']}' not in models")
-        _require(c["implementer"] in models, f"condition '{cid}': implementer '{c['implementer']}' not in models")
-        conditions.append(Condition(id=cid, planner=str(c["planner"]), implementer=str(c["implementer"])))
+        # planner/implementer accept either a registry key OR a direct Pi spec
+        # (e.g. `kimi-coding/kimi-for-coding` or `kimi-coding/kimi-for-coding:high`).
+        # Validate the thinking suffix here so typos fail fast.
+        for role in ("planner", "implementer"):
+            value = str(c[role])
+            spec, _, suffix = value.partition(":")
+            if spec not in models and "/" not in spec:
+                raise ConfigError(
+                    f"condition '{cid}': {role} '{value}' is not a known model key and "
+                    f"has no provider prefix; register it in models.yaml or use the "
+                    f"'provider/model_id' form"
+                )
+            if suffix:
+                _validate_thinking(suffix)
+        conditions.append(
+            Condition(
+                id=cid,
+                planner=str(c["planner"]),
+                implementer=str(c["implementer"]),
+            )
+        )
 
     return Config(models=models, judges=list(judges), conditions=conditions, costs=costs)

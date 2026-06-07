@@ -47,6 +47,7 @@ class SharedPlan:
     trial: int
     plan_text: str
     cost_usd: float
+    cost_source: str
     source_dir: Path
 
 
@@ -101,7 +102,10 @@ def _load_issue_url(issue: str, *, dry_run: bool) -> str:
 
 
 def validate_pi_models(model_specs: list[str], *, timeout: float = 60.0, ui=None) -> None:
-    for spec in _dedupe_ordered(model_specs):
+    # Pi's --model flag accepts the thinking label, but we drive it explicitly
+    # via set_thinking() in each phase, so strip it before deduping — specs that
+    # differ only in thinking level validate the same underlying model once.
+    for spec in _dedupe_ordered([s.partition(":")[0] for s in model_specs]):
         if ui:
             ui.log(f"validating Pi model: {spec}")
         try:
@@ -123,6 +127,30 @@ def _check_issue_prereqs(*, dry_run: bool) -> None:
     if shutil.which("gh") is None:
         raise ConfigError("gh CLI is required for real GitHub issue → PR runs")
     _git(["rev-parse", "--show-toplevel"], Path.cwd())
+
+
+def _is_unknown_model(cfg: Config, spec: str) -> bool:
+    """Return True when the spec has no registry entry in models.yaml.
+
+    Such specs are passed straight to Pi and skip the registry's defaults
+    for provider, thinking, and pricing (an optional `:thinking` suffix
+    does not affect registry lookup).
+    """
+    return spec.partition(":")[0] not in cfg.models
+
+
+def _merge_cost_source(*sources: str) -> str:
+    """Combine per-phase cost sources into a single label for the trial.
+
+    Priority: any 'unknown' dominates (the user can't trust the dollar
+    number); then 'configured'; then 'pi_reported'. This way the warning
+    banner surfaces the weakest source for the trial.
+    """
+    if any(s == "unknown" for s in sources):
+        return "unknown"
+    if any(s == "configured" for s in sources):
+        return "configured"
+    return "pi_reported"
 
 
 def _issue_url_from(prompts: dict[str, str]) -> str:
@@ -491,6 +519,7 @@ def run_shared_plan(
             duration_s=float(_stable_int(f"{planner_key}:plan:{trial}:duration", 18, 75)),
         )
         plan_cost = pc.usd
+        plan_source = pc.source
     else:
         plan_text, pc = run_plan_phase(
             planner,
@@ -505,11 +534,13 @@ def run_shared_plan(
             ui=ui,
         )
         plan_cost = pc.usd
+        plan_source = pc.source
     (plan_dir / "shared-plan.json").write_text(json.dumps(
         {
             "planner": planner_key,
             "trial": trial,
             "cost_usd": round(plan_cost, 6),
+            "cost_source": plan_source,
             "plan_dir": str(plan_dir),
         },
         indent=2,
@@ -519,6 +550,7 @@ def run_shared_plan(
         trial=trial,
         plan_text=plan_text,
         cost_usd=plan_cost,
+        cost_source=plan_source,
         source_dir=plan_dir,
     )
 
@@ -633,6 +665,7 @@ def run_condition_trial(
     copy_plan_artifacts(shared_plan, trial_dir)
     plan_text = shared_plan.plan_text
     plan_cost = shared_plan.cost_usd
+    plan_source = shared_plan.cost_source
 
     # --- implement ---
     if dry_run:
@@ -652,6 +685,7 @@ def run_condition_trial(
             tool_calls=_stable_int(f"{cond.id}:impl:{trial}:tools", 4, 24),
         )
         impl_cost = ic.usd
+        impl_source = ic.source
         impl_status = "complete"
         pr_id = "1"
     else:
@@ -670,6 +704,7 @@ def run_condition_trial(
             ui=ui,
         )
         impl_cost = impl.cost.usd
+        impl_source = impl.cost.source
         impl_status = impl.status
         pr_id = impl.pr_id
 
@@ -706,6 +741,7 @@ def run_condition_trial(
         dimensions={d: 0.0 for d in DIMENSIONS},   # filled after judging
         per_judge={},
         impl_status=impl_status,
+        cost_source=_merge_cost_source(plan_source, impl_source),
     )
     # stash paths for the judging pass
     record_meta = {
@@ -982,12 +1018,26 @@ def _main() -> None:
     if not args.dry_run and not args.skip_model_check:
         validate_pi_models([*(c.planner for c in conditions), *(c.implementer for c in conditions), *cfg.judges], ui=ui)
     ui.log("conditions:")
+    unknown_models: set[str] = set()
     for c in conditions:
-        planner_thinking = cfg.model(c.planner).thinking_level or "default/off"
-        implementer_thinking = cfg.model(c.implementer).thinking_level or "default/off"
+        planner_model = cfg.model(c.planner)
+        implementer_model = cfg.model(c.implementer)
+        planner_thinking = planner_model.thinking_level or "default/off"
+        implementer_thinking = implementer_model.thinking_level or "default/off"
+        planner_note = " *" if _is_unknown_model(cfg, c.planner) else ""
+        implementer_note = " *" if _is_unknown_model(cfg, c.implementer) else ""
         ui.log(
-            f"  - {c.id}: planner={c.planner} (thinking={planner_thinking}) "
-            f"implementer={c.implementer} (thinking={implementer_thinking})"
+            f"  - {c.id}: planner={c.planner}{planner_note} (thinking={planner_thinking}) "
+            f"implementer={c.implementer}{implementer_note} (thinking={implementer_thinking})"
+        )
+        if planner_note:
+            unknown_models.add(c.planner)
+        if implementer_note:
+            unknown_models.add(c.implementer)
+    if unknown_models:
+        ui.log(
+            "\n* model key(s) not in config/models.yaml; using spec directly with Pi. "
+            "Add them to models.yaml to set provider defaults, thinking, and pricing."
         )
     if not args.dry_run:
         ui.log("\nTip: if this is your first run, `duobench run --dry-run` validates the pipeline without API spend.")
@@ -1115,9 +1165,21 @@ def _main() -> None:
         print("Pi sessions: saved in Pi's default session store; paths are recorded in transcripts/report.html")
     # leaderboard preview
     ranked = sorted(results["conditions"].items(), key=lambda kv: kv[1]["quality"], reverse=True)
-    print("\nleaderboard (quality | cost$ | efficiency):")
+    print("\nleaderboard (quality | cost$ | cost-source | efficiency):")
+    unknown_pricing: list[str] = []
     for cid, c in ranked:
-        print(f"  {cid:14} {c['quality']:5.2f} | {c['cost_usd']:.4f} | {c['cost_efficiency']:.2f}")
+        source = c.get("cost_source", "unknown")
+        if source == "unknown":
+            unknown_pricing.append(cid)
+        print(f"  {cid:14} {c['quality']:5.2f} | {c['cost_usd']:.4f} | {source:12} | {c['cost_efficiency']:.2f}")
+    if unknown_pricing:
+        print(
+            "\nwarning: cost$ is 0.0000 with source 'unknown' for: "
+            + ", ".join(unknown_pricing)
+            + ". Add the model keys to config/models.yaml (pricing block) or create "
+              "a costs.yaml with rates for those keys. cost_efficiency is meaningless "
+              "until pricing is set."
+        )
 
 
 def main() -> None:

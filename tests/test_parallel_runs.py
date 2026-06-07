@@ -44,7 +44,7 @@ def test_prepare_shared_plans_runs_independent_planners_concurrently(tmp_path, m
         barrier.wait(timeout=2)
         plan_dir.mkdir(parents=True, exist_ok=True)
         (plan_dir / "plan.md").write_text(f"plan from {planner_key}")
-        return SharedPlan(planner_key, trial, f"plan from {planner_key}", 0.1, plan_dir)
+        return SharedPlan(planner_key, trial, f"plan from {planner_key}", 0.1, "configured", plan_dir)
 
     monkeypatch.setattr(run_mod, "run_shared_plan", fake_run_shared_plan)
 
@@ -69,8 +69,8 @@ def test_run_condition_trials_runs_independent_builds_concurrently(tmp_path, mon
     prompts = {"architect": "plan", "implement": "implement", "judge": "judge"}
     barrier = threading.Barrier(2)
     shared_plans = {
-        ("kimi", 0): SharedPlan("kimi", 0, "kimi plan", 0.1, tmp_path / "plans/kimi"),
-        ("gpt", 0): SharedPlan("gpt", 0, "gpt plan", 0.1, tmp_path / "plans/gpt"),
+        ("kimi", 0): SharedPlan("kimi", 0, "kimi plan", 0.1, "configured", tmp_path / "plans/kimi"),
+        ("gpt", 0): SharedPlan("gpt", 0, "gpt plan", 0.1, "configured", tmp_path / "plans/gpt"),
     }
 
     def fake_run_condition_trial(cfg, cond, trial, trial_dir, prompts, shared_plan, **kwargs):
