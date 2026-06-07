@@ -41,6 +41,7 @@ class ImplResult:
     status: str                      # "complete" | "timeout" | "stopped"
     final_text: str = ""
     pr_id: str = ""
+    duration_s: float = 0.0
     notes: list[str] = field(default_factory=list)
 
 
@@ -89,7 +90,8 @@ def run_impl_phase(
     if ui:
         ui.start_phase("Implementing", implementer.key)
 
-    deadline = time.monotonic() + timeout
+    phase_started = time.monotonic()
+    deadline = phase_started + timeout
 
     def remaining_timeout() -> float:
         return max(1.0, deadline - time.monotonic())
@@ -170,6 +172,7 @@ def run_impl_phase(
         status=status,
         final_text=final_text,
         pr_id=pr_id,
+        duration_s=time.monotonic() - phase_started,
         notes=notes,
     )
 

@@ -50,6 +50,7 @@ class SharedPlan:
     cost_usd: float
     cost_source: str
     source_dir: Path
+    duration_s: float = 0.0
 
 
 class LogOnlyUI:
@@ -510,6 +511,7 @@ def run_shared_plan(
         (plan_dir / "plan.md").write_text(plan_text)
         usage = _fake_usage(planner_key, "plan", trial)
         pc = compute_cost(usage, planner)
+        plan_duration = float(_stable_int(f"{planner_key}:plan:{trial}:duration", 18, 75))
         _write_fake_transcript(
             phase="planner",
             model=planner,
@@ -518,12 +520,12 @@ def run_shared_plan(
             usage=usage,
             cost=pc,
             path=plan_dir / "planner-transcript.json",
-            duration_s=float(_stable_int(f"{planner_key}:plan:{trial}:duration", 18, 75)),
+            duration_s=plan_duration,
         )
         plan_cost = pc.usd
         plan_source = pc.source
     else:
-        plan_text, pc = run_plan_phase(
+        plan_text, pc, plan_duration = run_plan_phase(
             planner,
             _format_prompt_template(prompts["architect"], issue_url=_issue_url_from(prompts)),
             plan_dir,
@@ -543,6 +545,7 @@ def run_shared_plan(
             "trial": trial,
             "cost_usd": round(plan_cost, 6),
             "cost_source": plan_source,
+            "duration_s": round(plan_duration, 2),
             "plan_dir": str(plan_dir),
         },
         indent=2,
@@ -554,6 +557,7 @@ def run_shared_plan(
         cost_usd=plan_cost,
         cost_source=plan_source,
         source_dir=plan_dir,
+        duration_s=plan_duration,
     )
 
 
@@ -668,6 +672,7 @@ def run_condition_trial(
     plan_text = shared_plan.plan_text
     plan_cost = shared_plan.cost_usd
     plan_source = shared_plan.cost_source
+    plan_duration = shared_plan.duration_s
 
     # --- implement ---
     if dry_run:
@@ -675,6 +680,7 @@ def run_condition_trial(
         _stub_build(build_dir, title=f"{cond.id} dry-run MiniDesk", accent=accent)
         usage = _fake_usage(cond.id, "implement", trial)
         ic = compute_cost(usage, implementer)
+        impl_duration = float(_stable_int(f"{cond.id}:impl:{trial}:duration", 90, 900))
         _write_fake_transcript(
             phase="implementer",
             model=implementer,
@@ -683,7 +689,7 @@ def run_condition_trial(
             usage=usage,
             cost=ic,
             path=trial_dir / "implementer-transcript.json",
-            duration_s=float(_stable_int(f"{cond.id}:impl:{trial}:duration", 90, 900)),
+            duration_s=impl_duration,
             tool_calls=_stable_int(f"{cond.id}:impl:{trial}:tools", 4, 24),
         )
         impl_cost = ic.usd
@@ -708,6 +714,7 @@ def run_condition_trial(
         impl_cost = impl.cost.usd
         impl_source = impl.cost.source
         impl_status = impl.status
+        impl_duration = impl.duration_s
         pr_id = impl.pr_id
 
     # --- verify / harness metadata ---
@@ -744,6 +751,8 @@ def run_condition_trial(
         per_judge={},
         impl_status=impl_status,
         cost_source=_merge_cost_source(plan_source, impl_source),
+        plan_duration_s=round(plan_duration, 2),
+        impl_duration_s=round(impl_duration, 2),
     )
     # stash paths for the judging pass
     record_meta = {
@@ -1173,13 +1182,15 @@ def _main() -> None:
         print("Pi sessions: saved in Pi's default session store; paths are recorded in transcripts/report.html")
     # leaderboard preview
     ranked = sorted(results["conditions"].items(), key=lambda kv: kv[1]["quality"], reverse=True)
-    print("\nleaderboard (quality | cost$ | cost-source | efficiency):")
+    print("\nleaderboard (quality | cost$ | cost-source | efficiency | time):")
     unknown_pricing: list[str] = []
     for cid, c in ranked:
         source = c.get("cost_source", "unknown")
         if source == "unknown":
             unknown_pricing.append(cid)
-        print(f"  {cid:14} {c['quality']:5.2f} | {c['cost_usd']:.4f} | {source:12} | {c['cost_efficiency']:.2f}")
+        duration = c.get("duration_s", 0.0)
+        time_label = f"{duration / 60:.1f}m" if duration else "n/a"
+        print(f"  {cid:14} {c['quality']:5.2f} | {c['cost_usd']:.4f} | {source:12} | {c['cost_efficiency']:.2f} | {time_label}")
     if unknown_pricing:
         print(
             "\nwarning: cost$ is 0.0000 with source 'unknown' for: "

@@ -28,8 +28,8 @@ def run_plan_phase(
     persist_pi_session: bool = False,
     session_name: str | None = None,
     ui=None,
-) -> tuple[str, PhaseCost]:
-    """Run the planner; write plan.md to out_dir. Returns (plan_text, cost)."""
+) -> tuple[str, PhaseCost, float]:
+    """Run the planner; write plan.md to out_dir. Returns (plan_text, cost, duration_s)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     transcript = new_transcript("planner", planner)
     if ui:
@@ -76,7 +76,7 @@ def run_plan_phase(
 
     plan_path = out_dir / "plan.md"
     plan_path.write_text(result.text)
-    return result.text, cost
+    return result.text, cost, ended - started
 
 
 def _session_metadata(state: dict, requested_name: str | None) -> dict | None:

@@ -44,6 +44,9 @@ class TrialRecord:
     impl_status: str = "complete"
     # "pi_reported" | "configured" | "unknown" — see cost.compute_cost()
     cost_source: str = "unknown"
+    # wall-clock seconds per phase (0.0 if not measured, e.g. older runs)
+    plan_duration_s: float = 0.0
+    impl_duration_s: float = 0.0
 
 
 def _mean(xs: list[float]) -> float:
@@ -78,6 +81,7 @@ def aggregate(records: list[TrialRecord], judges: list[str]) -> dict:
             statistics.fmean([t.dimensions.get(d, 0.0) for d in DIMENSIONS]) for t in trs
         ]
         costs = [t.cost_usd for t in trs]
+        durations = [t.plan_duration_s + t.impl_duration_s for t in trs]
         quality = _mean(qualities)
         cost_usd = _mean(costs)
         conditions[cid] = {
@@ -93,6 +97,10 @@ def aggregate(records: list[TrialRecord], judges: list[str]) -> dict:
             "trials": len(trs),
             "impl_statuses": [t.impl_status for t in trs],
             "cost_source": _majority_source(trs),
+            "duration_s": _mean(durations),
+            "duration_std": _std(durations),
+            "plan_duration_s": _mean([t.plan_duration_s for t in trs]),
+            "impl_duration_s": _mean([t.impl_duration_s for t in trs]),
         }
 
     # Self-bias: for each judge, its average overall score per condition.
