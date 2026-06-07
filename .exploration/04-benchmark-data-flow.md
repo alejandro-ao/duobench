@@ -1,23 +1,27 @@
 # Benchmark Data Flow
 
-This document follows data from the original prompt through planning, implementation, verification, judging, aggregation, charts, and reports.
+This document follows data from the GitHub issue through planning, PR creation, judging, aggregation, charts, and reports.
 
 ## End-to-End Data Flow
 
 ```text
-User prompt
+GitHub issue URL
   ↓
-Planner prompt template + local repo exploration
+Planner prompt template + local repo/gh exploration
   ↓
 plan.md
   ↓
-Implementer prompt template + plan text
+Implementer prompt template + issue URL + plan text
   ↓
-build/ files
+isolated git worktree
   ↓
-Playwright verification + screenshots
+implementer-created branch + commit + pushed PR
   ↓
-Judge prompt bundle: user task + plan + diff/status + source + smoke summary + screenshots
+PR id returned by implementer
+  ↓
+Judge prompt bundle: issue URL + PR id + plan + metadata
+  ↓
+judge uses git/gh to review PR
   ↓
 per-judge scores
   ↓
@@ -28,8 +32,6 @@ charts + report.html
 
 ## Planner Artifacts
 
-Shared planner outputs live under:
-
 ```text
 runs/<timestamp>/shared-plans/<planner>/trial-<n>/
   plan.md
@@ -38,11 +40,7 @@ runs/<timestamp>/shared-plans/<planner>/trial-<n>/
   planner-events.jsonl
 ```
 
-The important handoff artifact is `plan.md`. The transcript and event log are for inspection/debugging.
-
 ## Condition Trial Artifacts
-
-Each planner × implementer condition and trial gets its own directory:
 
 ```text
 runs/<timestamp>/conditions/<condition-id>/trial-<n>/
@@ -51,98 +49,45 @@ runs/<timestamp>/conditions/<condition-id>/trial-<n>/
   planner-events.jsonl
   implementer-transcript.json
   implementer-events.jsonl
-  build/
-  screenshots/
+  worktree/
   verify.json
   trial.json
   judge-transcripts/
 ```
 
+`worktree/` is the isolated git worktree where the implementer worked. `verify.json` records PR/worktree metadata; the actual correctness evaluation is done by judges inspecting the PR.
+
 ## Transcripts
 
-`src/duobench/transcript.py` stores prompt/response details for each model phase.
-
-A transcript turn includes:
-
-| Field | Meaning |
-|-------|---------|
-| `kind` | `prompt`, `follow_up`, or dry-run marker |
-| `prompt` | Full prompt sent to the model |
-| `assistant_text` | Final assistant text for that turn |
-| `messages` | Raw Pi message objects for the turn |
-| `usage` | Input/output/cache tokens and Pi-reported cost |
-| `cost` | Configured benchmark cost from `models.yaml` |
-| `duration_s` | Turn duration |
-
-`transcript_stats()` derives totals such as number of turns, messages, tool calls, tokens, and USD.
-
-## Verification
-
-`src/duobench/verify.py` uses Playwright to load the generated `build/index.html` through `file://`.
-
-It records:
-
-- whether desktop markup rendered,
-- whether taskbar markup rendered,
-- fatal console/page errors,
-- launchable app candidates,
-- how many apps opened windows,
-- screenshots.
-
-The result is written to `verify.json` and summarized for judges with `VerifyResult.summary_for_judge()`.
+`src/duobench/transcript.py` stores prompt/response details for each model phase, including full prompt, assistant text, raw Pi messages, usage, cost, and duration.
 
 ## Judging
 
-`src/duobench/judge.py` collects source files and a git diff/status when available, combines them with the user task, planner handoff, smoke-test results, and screenshots, then sends that bundle to every configured judge model.
+`src/duobench/judge.py` sends the issue URL, PR id, planner handoff, and harness metadata to every configured judge model. Judges have local read/bash tools, so they can run `gh pr view`, `gh pr diff`, `gh issue view`, `git show`, and related commands.
 
-The judged dimensions are defined in `DIMENSIONS`:
+The judged dimensions are:
 
 ```python
 DIMENSIONS = ("task_completion", "correctness", "code_quality", "verification")
 ```
 
-Each judge returns integer scores from 1 to 10. `average_dimensions()` averages valid judge scores for the trial record.
-
 ## Aggregation
 
 `src/duobench/aggregate.py` takes all `TrialRecord` objects and produces `results.json`.
 
-Important computed fields:
-
 | Field | Meaning |
 |-------|---------|
 | `dimensions` | Mean task_completion/correctness/code_quality/verification scores |
-| `quality` | Mean of the three judged dimensions |
+| `quality` | Mean of the judged dimensions |
 | `cost_usd` | Mean planner + implementer cost |
 | `cost_efficiency` | `quality / cost_usd` |
 | `self_bias` | Judge × condition score matrix |
 
-Cost efficiency is intentionally computed by the harness, not by the judge models.
+Cost efficiency is computed by the harness, not by the judge models.
 
-## Charts
+## Charts and Report
 
-`src/duobench/charts.py` writes both PNG and CSV outputs:
-
-| Chart | Purpose |
-|-------|---------|
-| `leaderboard.png/.csv` | Quality ranking |
-| `dimension-radar.png/.csv` | Architecture/correctness/visual UX profile |
-| `cost-vs-quality.png/.csv` | Main cost/quality trade-off chart |
-| `self-bias-matrix.png/.csv` | Judge score heatmap |
-
-## Report
-
-`src/duobench/report.py` generates `report.html`.
-
-The report embeds or links:
-
-- leaderboard summary,
-- generated build iframe,
-- screenshots,
-- planner transcript,
-- implementer transcript,
-- judge transcripts,
-- timing/token/cost metrics.
+`src/duobench/charts.py` writes PNG/CSV outputs for leaderboard, dimension radar, cost-vs-quality, and self-bias. `src/duobench/report.py` writes `report.html` with transcripts, metrics, and trial metadata.
 
 ## Related Documents
 

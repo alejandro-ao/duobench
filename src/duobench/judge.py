@@ -4,8 +4,8 @@ Each judge model scores task_completion / correctness / code_quality / verificat
 (1-10) as strict JSON. Cost efficiency is NOT judged — it's computed objectively in
 results aggregation.
 
-Inputs per build: original user task, planner handoff plan, implementation diff/status,
-concatenated source code, smoke-test summary, and screenshots when available.
+Inputs per PR: GitHub issue URL, implementer-returned PR id, planner handoff plan,
+and harness metadata. Judges use local git/gh tools to inspect the PR.
 
 Scores are averaged across the panel. Raw per-judge scores are kept so a judge×build
 self-bias matrix can be plotted.
@@ -16,7 +16,6 @@ from __future__ import annotations
 import base64
 import json
 import re
-import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -80,53 +79,6 @@ def collect_source(build_dir: Path) -> str:
     return "".join(parts) if parts else "[no source files found]"
 
 
-def collect_solution_diff(work_dir: Path, *, max_chars: int = 120_000) -> str:
-    """Return git status/diff when available, otherwise a source snapshot note."""
-    def run_git(args: list[str]) -> str | None:
-        try:
-            proc = subprocess.run(
-                ["git", "-C", str(work_dir), *args],
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=20,
-            )
-        except Exception:
-            return None
-        if proc.returncode != 0:
-            return None
-        return proc.stdout.strip()
-
-    top = run_git(["rev-parse", "--show-toplevel"])
-    if top:
-        status = run_git(["status", "--short"]) or "[clean]"
-        diff_stat = run_git(["diff", "--stat", "--", "."]) or ""
-        diff = run_git(["diff", "--", "."]) or ""
-        untracked = [line[3:] for line in status.splitlines() if line.startswith("?? ")]
-        untracked_parts: list[str] = []
-        for rel in untracked[:20]:
-            path = work_dir / rel
-            if path.is_file() and path.suffix.lower() in _SOURCE_EXTS:
-                try:
-                    text = path.read_text(errors="replace")
-                except Exception:
-                    continue
-                untracked_parts.append(f"\n===== UNTRACKED FILE: {rel} =====\n{text}\n")
-        body = (
-            f"Git status:\n{status}\n\n"
-            f"Git diff stat:\n{diff_stat or '[no tracked-file diff]'}\n\n"
-            f"Git diff:\n{diff or '[no tracked-file diff]'}\n"
-            f"{''.join(untracked_parts)}"
-        )
-    else:
-        body = (
-            "No git repository was detected for the implementation directory. "
-            "Evaluate the solution from the source snapshot below.\n\n"
-            f"Files:\n{collect_source(work_dir)}"
-        )
-    return body[:max_chars] + ("\n[...solution diff truncated...]" if len(body) > max_chars else "")
-
-
 def _encode_images(screenshots: list[str], limit: int = 5) -> list[dict]:
     imgs: list[dict] = []
     for sp in screenshots[:limit]:
@@ -175,9 +127,9 @@ def judge_build(
     smoke_summary: str,
     screenshots: list[str],
     *,
-    user_task: str,
+    issue_url: str,
+    pr_id: str,
     plan: str,
-    solution_diff: str,
     timeout: float = 300.0,
     transcript_path: Path | None = None,
     persist_pi_session: bool = False,
@@ -186,11 +138,10 @@ def judge_build(
 ) -> JudgeScore:
     prompt = (
         judge_prompt_template
-        .replace("{user_task}", user_task)
+        .replace("{issue_url}", issue_url)
+        .replace("{pr_id}", pr_id)
         .replace("{plan}", plan)
-        .replace("{solution_diff}", solution_diff)
         .replace("{smoke_results}", smoke_summary)
-        .replace("{source}", source)
     )
     images = _encode_images(screenshots)
     transcript = new_transcript("judge", judge_model)
@@ -200,7 +151,8 @@ def judge_build(
     raw_events_path = transcript_path.with_suffix(".events.jsonl") if transcript_path else None
     with PiSession(
         cwd=Path.cwd(),
-        enable_tools=False,
+        enable_tools=True,
+        allowed_tools=["read", "grep", "find", "ls", "bash"],
         event_callback=getattr(ui, "on_rpc_event", None),
         raw_events_path=raw_events_path,
         persist_session=persist_pi_session,
@@ -264,9 +216,9 @@ def judge_panel(
     smoke_summary: str,
     screenshots: list[str],
     *,
-    user_task: str = "",
+    issue_url: str = "",
+    pr_id: str = "",
     plan: str = "",
-    solution_diff: str | None = None,
     timeout: float = 300.0,
     transcripts_dir: Path | None = None,
     persist_pi_session: bool = False,
@@ -275,7 +227,6 @@ def judge_panel(
 ) -> list[JudgeScore]:
     """Run every configured judge over one build."""
     source = collect_source(build_dir)
-    solution_diff = solution_diff if solution_diff is not None else collect_solution_diff(build_dir)
     scores: list[JudgeScore] = []
     for judge_key in cfg.judges:
         model = cfg.model(judge_key)
@@ -285,9 +236,9 @@ def judge_panel(
             judge_build(
                 model, judge_key, judge_prompt_template,
                 source, smoke_summary, screenshots,
-                user_task=user_task,
+                issue_url=issue_url,
+                pr_id=pr_id,
                 plan=plan,
-                solution_diff=solution_diff,
                 timeout=timeout,
                 transcript_path=transcript_path,
                 persist_pi_session=persist_pi_session,

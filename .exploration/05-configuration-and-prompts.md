@@ -1,10 +1,8 @@
 # Configuration and Prompts
 
-This document explains how `duobench` is configured and how the planner/implementer prompts are assembled.
+This document explains how `duobench` is configured and how its GitHub issue / PR prompts are assembled.
 
 ## Configuration Files
-
-There are two YAML config files:
 
 ```text
 config/models.yaml
@@ -18,11 +16,11 @@ src/duobench/defaults/config/
 src/duobench/defaults/prompts/
 ```
 
-If the CLI default paths are missing in the current directory, `duobench` falls back to packaged defaults. This allows installed `duobench` to run from another experiment directory.
+If default CLI paths are missing in the current directory, `duobench` falls back to packaged defaults.
 
 ## Models
 
-`src/duobench/config.py` loads models into this dataclass:
+`src/duobench/config.py` loads models into:
 
 ```python
 @dataclass(frozen=True)
@@ -34,39 +32,11 @@ class Model:
     thinking_level: str | None = None
 ```
 
-Example YAML shape:
-
-```yaml
-models:
-  kimi-k2.6:
-    provider: kimi-coding
-    model_id: kimi-for-coding
-    thinking: high
-    pricing: { input: 0.95, output: 4.00 }
-judges:
-  - kimi-k2.6
-```
-
 The `provider` and `model_id` are passed directly to Pi RPC `set_model`.
-
-## Pricing
-
-Pricing is represented as dollars per million tokens:
-
-```python
-@dataclass(frozen=True)
-class Pricing:
-    input: float
-    output: float
-    cache_read: float | None = None
-    cache_write: float | None = None
-```
-
-`src/duobench/cost.py` computes benchmark cost from the configured rates. Pi/provider-reported cost is preserved separately for auditing, but configured pricing is the benchmark source of truth.
 
 ## Conditions
 
-Conditions are explicit planner × implementer pairs:
+Conditions are planner × implementer pairs:
 
 ```python
 @dataclass(frozen=True)
@@ -76,38 +46,17 @@ class Condition:
     implementer: str
 ```
 
-They can come from `conditions.yaml`, or be generated from CLI flags such as `--models`, `--planners`, and `--implementers`.
+They can come from `conditions.yaml`, or be generated from `--models`, `--planners`, and `--implementers`.
 
-## Fail-fast Validation
+## GitHub Issue Input
 
-`load_config()` validates that:
-
-- `models` is a non-empty mapping,
-- every model has `provider`, `model_id`, and `pricing`,
-- `judges` is a non-empty list,
-- every judge key exists in `models`,
-- every condition planner/implementer key exists in `models`,
-- thinking levels are one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`.
-
-This catches config mistakes before any model/API calls are made.
-
-## User Prompt
-
-The benchmark now starts from one realistic user task prompt.
-
-You can provide it inline:
+Real runs require a GitHub issue:
 
 ```bash
-duobench --prompt 'fix the issue described here: ...' --models kimi,gpt --trials 1
+duobench --issue https://github.com/org/repo/issues/123 --models kimi,gpt --trials 1
 ```
 
-or from a file:
-
-```bash
-duobench --prompt-file issue.md --models kimi,gpt --trials 1
-```
-
-If neither is provided, `DEFAULT_USER_PROMPT` in `src/duobench/run.py` uses the MiniDesk app task for backwards compatibility.
+The harness does not parse the issue. Agents must use `gh` themselves.
 
 ## Prompt Templates
 
@@ -127,46 +76,41 @@ src/duobench/defaults/prompts/
 
 ### Planner prompt
 
-The planner template includes:
+Uses:
 
 ```text
-User task:
-
-{user_prompt}
+{issue_url}
 ```
 
-It asks the planner to inspect the local repository, produce a concise implementation plan, and avoid modifying files.
-
-Important detail: no web access is bundled. If the user prompt references an external URL, the planner is told to note that the content is inaccessible and proceed from local context.
+The planner should inspect the issue/repo using local tools and `gh`, then return only a plan. It must not modify files or create branches/PRs.
 
 ### Implementer prompt
 
-The implementer template includes both placeholders:
+Uses:
 
 ```text
-{user_prompt}
+{issue_url}
 {plan}
 ```
 
-It tells the implementer to use the plan as guidance but verify it independently.
+The implementer must inspect the issue, create a branch, change code, test, commit, push, open a PR, and return only the PR id.
 
 ### Judge prompt
 
-The judge prompt is task-agnostic and uses these placeholders:
+Uses:
 
 ```text
-{user_task}
+{issue_url}
+{pr_id}
 {plan}
-{solution_diff}
-{source}
 {smoke_results}
 ```
 
-`judge.py` replaces those before sending the prompt to each judge model. `solution_diff` is a git status/diff when available; otherwise it explains that no git repository was detected and falls back to the source snapshot.
+The judge uses git and `gh` to inspect the issue/PR and returns strict JSON scores for `task_completion`, `correctness`, `code_quality`, and `verification`.
 
 ## Prompt Formatting Code
 
-`src/duobench/run.py` uses `_format_prompt_template()` to substitute placeholders. If a template references an unknown placeholder, the function raises a `ConfigError` with a clear message.
+`src/duobench/run.py` uses `_format_prompt_template()` to substitute placeholders. If a template references an unknown placeholder, it raises a `ConfigError`.
 
 ## Related Documents
 

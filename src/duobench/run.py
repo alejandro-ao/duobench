@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import json
 import shutil
+import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -37,7 +38,7 @@ from duobench.ui import make_ui
 
 AUTO_PARALLEL_WORKERS = 2
 ALL_PARALLEL_WORKERS = 10_000
-DEFAULT_USER_PROMPT = """Build MiniDesk, a small desktop-like browser app that runs directly from index.html using vanilla HTML, CSS, and JavaScript. It should include a desktop area, a bottom taskbar with a clock, and exactly three launchable apps: Notes with localStorage persistence, Calculator with basic arithmetic, and Todo with add/complete/delete plus localStorage persistence. Use no frameworks, build step, CDNs, external assets, or ES modules. Keep the implementation small and robust."""
+DEFAULT_ISSUE_URL = "https://github.com/example/repo/issues/1"
 
 
 @dataclass(frozen=True)
@@ -90,21 +91,27 @@ def _load_prompt(name: str) -> str:
     return (resources.files("duobench.defaults.prompts") / name).read_text()
 
 
-def _load_user_prompt(prompt: str, prompt_file: str) -> str:
-    if prompt and prompt_file:
-        raise ConfigError("use either --prompt or --prompt-file, not both")
-    if prompt_file:
-        path = Path(prompt_file)
-        if not path.is_file():
-            raise ConfigError(f"--prompt-file not found: {path}")
-        text = path.read_text().strip()
-    else:
-        text = prompt.strip()
-    return text or DEFAULT_USER_PROMPT
+def _load_issue_url(issue: str, *, dry_run: bool) -> str:
+    text = issue.strip()
+    if text:
+        return text
+    if dry_run:
+        return DEFAULT_ISSUE_URL
+    raise ConfigError("--issue is required for real runs; duobench is coupled to the GitHub issue → PR workflow")
 
 
-def _user_prompt_from(prompts: dict[str, str]) -> str:
-    return prompts.get("user_prompt", DEFAULT_USER_PROMPT)
+def _check_issue_prereqs(*, dry_run: bool) -> None:
+    if dry_run:
+        return
+    if shutil.which("git") is None:
+        raise ConfigError("git is required for real GitHub issue → PR runs")
+    if shutil.which("gh") is None:
+        raise ConfigError("gh CLI is required for real GitHub issue → PR runs")
+    _git(["rev-parse", "--show-toplevel"], Path.cwd())
+
+
+def _issue_url_from(prompts: dict[str, str]) -> str:
+    return prompts.get("issue_url", DEFAULT_ISSUE_URL)
 
 
 def _format_prompt_template(template: str, **values: str) -> str:
@@ -216,10 +223,10 @@ def _write_fake_transcript(
 
 def _stub_plan(planner_key: str = "stub-planner") -> str:
     return (
-        f"# Dry-run MiniDesk plan from {planner_key}\n\n"
-        "- Build a small desktop shell with a taskbar, clock, desktop icons, and windows.\n"
-        "- Implement exactly three apps: Notes, Calculator, and Todo.\n"
-        "- Persist Notes and Todo state in localStorage. Keep the code simple and file:// safe.\n"
+        f"# Dry-run GitHub issue plan from {planner_key}\n\n"
+        "- Inspect the issue with `gh issue view` and confirm acceptance criteria.\n"
+        "- Identify the relevant code paths and make a focused fix.\n"
+        "- Add or update tests where practical, run checks, then open a PR referencing the issue.\n"
     )
 
 
@@ -266,7 +273,7 @@ def _stub_build(build_dir: Path, *, title: str = "Dry-run MiniDesk", accent: str
 
 
 def _normalize_argv(argv: list[str]) -> list[str]:
-    """Allow `duobench --prompt ...` as shorthand for `duobench run --prompt ...`."""
+    """Allow `duobench --issue ...` as shorthand for `duobench run --issue ...`."""
     if argv and argv[0] not in {"run", "report", "-h", "--help"}:
         return ["run", *argv]
     return argv
@@ -380,6 +387,30 @@ def _safe_path_part(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in value)
 
 
+def _git(args: list[str], cwd: Path, *, timeout: float = 60.0) -> str:
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout,
+    )
+    if proc.returncode != 0:
+        raise ConfigError(f"git {' '.join(args)} failed: {proc.stderr.strip() or proc.stdout.strip()}")
+    return proc.stdout.strip()
+
+
+def prepare_worktree(repo_dir: Path, worktree_dir: Path, *, branch: str) -> Path:
+    """Create an isolated git worktree for one implementer trial."""
+    _git(["rev-parse", "--show-toplevel"], repo_dir)
+    worktree_dir.parent.mkdir(parents=True, exist_ok=True)
+    if worktree_dir.exists():
+        shutil.rmtree(worktree_dir)
+    _git(["worktree", "add", "-B", branch, str(worktree_dir), "HEAD"], repo_dir, timeout=120.0)
+    return worktree_dir
+
+
 def _unique_planners(conditions: list[Condition]) -> list[str]:
     planners: list[str] = []
     seen: set[str] = set()
@@ -441,7 +472,7 @@ def run_shared_plan(
         _write_fake_transcript(
             phase="planner",
             model=planner,
-            prompt=_format_prompt_template(prompts["architect"], user_prompt=_user_prompt_from(prompts)),
+            prompt=_format_prompt_template(prompts["architect"], issue_url=_issue_url_from(prompts)),
             assistant_text=plan_text,
             usage=usage,
             cost=pc,
@@ -452,7 +483,7 @@ def run_shared_plan(
     else:
         plan_text, pc = run_plan_phase(
             planner,
-            _format_prompt_template(prompts["architect"], user_prompt=_user_prompt_from(prompts)),
+            _format_prompt_template(prompts["architect"], issue_url=_issue_url_from(prompts)),
             plan_dir,
             workspace_dir=workspace_dir,
             timeout=plan_timeout,
@@ -582,8 +613,9 @@ def run_condition_trial(
         judge_timeout=judge_timeout,
     )
     implementer = cfg.model(cond.implementer)
-    build_dir = trial_dir / "build"
+    build_dir = trial_dir / ("build" if dry_run else "worktree")
     shots_dir = trial_dir / "screenshots"
+    pr_id = ""
     (ui.log if ui else print)(f"  [{cond.id} trial {trial}] plan={cond.planner} impl={cond.implementer}")
 
     # --- plan handoff ---
@@ -600,8 +632,8 @@ def run_condition_trial(
         _write_fake_transcript(
             phase="implementer",
             model=implementer,
-            prompt=_format_prompt_template(prompts["implement"], user_prompt=_user_prompt_from(prompts), plan=plan_text),
-            assistant_text=f"Built synthetic MiniDesk for {cond.id}. BUILD COMPLETE",
+            prompt=_format_prompt_template(prompts["implement"], issue_url=_issue_url_from(prompts), plan=plan_text),
+            assistant_text="1",
             usage=usage,
             cost=ic,
             path=trial_dir / "implementer-transcript.json",
@@ -610,10 +642,13 @@ def run_condition_trial(
         )
         impl_cost = ic.usd
         impl_status = "complete"
+        pr_id = "1"
     else:
+        branch = _safe_path_part(f"duobench/{run_label}/{cond.id}/trial-{trial}")
+        prepare_worktree(Path.cwd(), build_dir, branch=branch)
         impl = run_impl_phase(
             implementer,
-            _format_prompt_template(prompts["implement"], user_prompt=_user_prompt_from(prompts), plan=plan_text),
+            _format_prompt_template(prompts["implement"], issue_url=_issue_url_from(prompts), plan=plan_text),
             plan_text,
             build_dir,
             timeout=impl_timeout,
@@ -625,14 +660,31 @@ def run_condition_trial(
         )
         impl_cost = impl.cost.usd
         impl_status = impl.status
+        pr_id = impl.pr_id
 
-    # --- verify ---
-    if ui:
-        ui.start_phase("Verifying", "Playwright")
-    vres = verify_build(build_dir, shots_dir)
-    if ui:
-        ui.end_phase("complete" if vres.boots_ok else "issues found")
-    (trial_dir / "verify.json").write_text(json.dumps(vres.to_dict(), indent=2))
+    # --- verify / harness metadata ---
+    if dry_run:
+        if ui:
+            ui.start_phase("Verifying", "Playwright")
+        vres = verify_build(build_dir, shots_dir)
+        if ui:
+            ui.end_phase("complete" if vres.boots_ok else "issues found")
+        verify_payload = vres.to_dict()
+        smoke_summary = vres.summary_for_judge()
+        screenshots = vres.screenshots
+    else:
+        if ui:
+            ui.start_phase("Recording PR metadata", "git/gh")
+        verify_payload = {
+            "pr_id": pr_id,
+            "worktree": str(build_dir),
+            "notes": ["Implementation agent is responsible for tests, commit, push, and PR creation."],
+        }
+        smoke_summary = json.dumps(verify_payload, indent=2)
+        screenshots = []
+        if ui:
+            ui.end_phase("complete" if pr_id else "missing PR id")
+    (trial_dir / "verify.json").write_text(json.dumps(verify_payload, indent=2))
 
     record = TrialRecord(
         condition_id=cond.id,
@@ -647,8 +699,9 @@ def run_condition_trial(
     # stash paths for the judging pass
     record_meta = {
         "build_dir": str(build_dir),
-        "smoke_summary": vres.summary_for_judge(),
-        "screenshots": vres.screenshots,
+        "pr_id": pr_id,
+        "smoke_summary": smoke_summary,
+        "screenshots": screenshots,
     }
     artifacts = {
         "plan": {
@@ -802,11 +855,10 @@ def _write_dry_run_judge_transcripts(
         )
         rendered_prompt = (
             judge_prompt
-            .replace("{user_task}", DEFAULT_USER_PROMPT)
+            .replace("{issue_url}", DEFAULT_ISSUE_URL)
+            .replace("{pr_id}", "1")
             .replace("{plan}", "[dry-run synthetic plan]")
-            .replace("{solution_diff}", "[dry-run synthetic solution diff]")
             .replace("{smoke_results}", "[dry-run synthetic smoke results]")
-            .replace("{source}", "[dry-run synthetic source]")
         )
         _write_fake_transcript(
             phase="judge",
@@ -836,8 +888,7 @@ def _main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     rp = sub.add_parser("run", help="run the benchmark")
     rp.add_argument("--trials", type=int, default=1)
-    rp.add_argument("--prompt", type=str, default="", help="user task prompt to give to each planner")
-    rp.add_argument("--prompt-file", type=str, default="", help="read the user task prompt from a file")
+    rp.add_argument("--issue", type=str, default="", help="GitHub issue URL or issue reference to fix; required for real runs")
     rp.add_argument("--conditions", type=str, default="", help="comma-separated condition ids from conditions.yaml")
     rp.add_argument("--models", type=str, default="",
                     help="comma-separated model keys; generate the full planner×implementer matrix")
@@ -879,9 +930,10 @@ def _main() -> None:
     )
     parallel_workers = resolve_parallel(args.parallel)
 
-    user_prompt = _load_user_prompt(args.prompt, args.prompt_file)
+    issue_url = _load_issue_url(args.issue, dry_run=args.dry_run)
+    _check_issue_prereqs(dry_run=args.dry_run)
     prompts = {
-        "user_prompt": user_prompt,
+        "issue_url": issue_url,
         "architect": _load_prompt("architect.md"),
         "implement": _load_prompt("implement.md"),
         "judge": _load_prompt("judge.md"),
@@ -898,14 +950,14 @@ def _main() -> None:
     ui.log(f"run dir: {run_dir}")
     ui.log(f"trials per condition: {args.trials}")
     ui.log(f"selection: {selection_mode}")
-    prompt_source = f"file {args.prompt_file}" if args.prompt_file else ("--prompt" if args.prompt else "default MiniDesk prompt")
-    ui.log(f"user prompt: {prompt_source} ({len(user_prompt)} chars)")
+    prompt_source = "--issue" if args.issue else "dry-run default issue"
+    ui.log(f"GitHub issue: {prompt_source} ({len(issue_url)} chars)")
     parallel_label = "all jobs in each phase" if args.parallel == "all" else f"{parallel_workers} max"
     ui.log(f"parallel workers: {args.parallel} ({parallel_label})")
     plan_jobs = len(_unique_planners(conditions)) * args.trials
     impl_jobs = len(conditions) * args.trials
     judge_jobs = impl_jobs * len(cfg.judges)
-    ui.log(f"phase plan: {plan_jobs} shared planner run(s) → build: {impl_jobs} implementation run(s) → judge: {judge_jobs} judge run(s)")
+    ui.log(f"phase plan: {plan_jobs} shared planner run(s) → PR: {impl_jobs} implementation run(s) → judge: {judge_jobs} judge run(s)")
     ui.log(f"Pi sessions: {'saved with descriptive names' if args.pi_sessions and not args.dry_run else 'not saved'}")
     ui.log("conditions:")
     for c in conditions:
@@ -985,7 +1037,8 @@ def _main() -> None:
         scores = judge_panel(
             cfg, prompts["judge"], Path(meta["build_dir"]),
             meta["smoke_summary"], meta["screenshots"],
-            user_task=_user_prompt_from(prompts),
+            issue_url=_issue_url_from(prompts),
+            pr_id=meta.get("pr_id", ""),
             plan=(trial_dir / "plan.md").read_text() if (trial_dir / "plan.md").exists() else "",
             timeout=args.judge_timeout,
             transcripts_dir=trial_dir / "judge-transcripts",

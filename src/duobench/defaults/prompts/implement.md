@@ -1,13 +1,22 @@
-Complete the following user task:
+Complete the GitHub issue below and open a pull request.
 
-{user_prompt}
+GitHub issue:
+
+{issue_url}
 
 Another agent explored the repository and produced this plan:
 
 {plan}
 
-Use the plan as guidance, but verify it yourself. Make the necessary code changes in the current working directory and run appropriate checks if possible.
+Instructions:
 
-If the task references an external URL or resource that is not available through local tools, proceed using the information available in the prompt, plan, and local repository.
+1. Use the `gh` CLI to inspect the issue and any relevant comments yourself.
+2. Use the plan as guidance, but verify it independently.
+3. Create an appropriately named branch for your work.
+4. Make the necessary code changes.
+5. Run appropriate tests or checks when possible.
+6. Commit your changes.
+7. Push the branch and create a GitHub pull request for the issue.
+8. In your final response, return ONLY the PR id. Do not include prose, markdown, a summary, or anything else.
 
-When the task is complete, include `TASK COMPLETE` in your final response and briefly summarize what changed and what you verified.
+The PR id may be the PR number (for example `123`) or a canonical PR URL.

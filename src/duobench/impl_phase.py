@@ -13,6 +13,7 @@ the agent to keep working until it signals completion.
 from __future__ import annotations
 
 import time
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,13 +24,12 @@ from duobench.transcript import new_transcript
 
 # Heuristic completion markers the implementer is asked to emit when done.
 _DONE_MARKERS = (
-    "task complete", "implementation complete", "implementation is complete",
-    "build complete", "build is complete"
+    "pr created", "pull request created", "opened pr", "created pr"
 )
 _CONTINUE_MSG = (
-    "Continue working on the task. If anything from the user request or plan is missing or "
-    "incomplete, implement it now and run appropriate checks if possible. When everything is "
-    "complete, reply with exactly: TASK COMPLETE"
+    "Continue working on the GitHub issue. If the PR has not been created yet, inspect the "
+    "issue with gh, finish the code changes, run appropriate checks, commit, push, and open "
+    "the PR. When the PR exists, reply with only the PR id."
 )
 _MAX_FOLLOW_UPS = 12  # safety bound on the nudge loop, not a per-agent turn cap
 
@@ -40,12 +40,24 @@ class ImplResult:
     turns: int
     status: str                      # "complete" | "timeout" | "stopped"
     final_text: str = ""
+    pr_id: str = ""
     notes: list[str] = field(default_factory=list)
+
+
+def extract_pr_id(text: str) -> str:
+    stripped = text.strip()
+    url = re.search(r"https://github\.com/[^\s/]+/[^\s/]+/pull/(\d+)", stripped)
+    if url:
+        return url.group(1)
+    number = re.search(r"(?:^|\s)#?(\d{1,10})(?:\s|$)", stripped)
+    if number:
+        return number.group(1)
+    return ""
 
 
 def _looks_done(text: str) -> bool:
     low = text.lower()
-    return "build complete" in low or any(m in low for m in _DONE_MARKERS)
+    return bool(extract_pr_id(text)) or any(m in low for m in _DONE_MARKERS)
 
 
 def run_impl_phase(
@@ -69,6 +81,7 @@ def run_impl_phase(
     turns = 0
     status = "stopped"
     final_text = ""
+    pr_id = ""
     notes: list[str] = []
     session_state: dict = {}
 
@@ -105,6 +118,7 @@ def run_impl_phase(
             if ui:
                 ui.add_turn_result(result.usage, turn_cost.usd, turn_cost.reported_usd)
             final_text = result.text
+            pr_id = extract_pr_id(result.text)
             if _looks_done(result.text):
                 status = "complete"
             else:
@@ -123,6 +137,7 @@ def run_impl_phase(
                     if ui:
                         ui.add_turn_result(result.usage, turn_cost.usd, turn_cost.reported_usd)
                     final_text = result.text
+                    pr_id = extract_pr_id(result.text) or pr_id
                     if _looks_done(result.text):
                         status = "complete"
                         break
@@ -137,9 +152,8 @@ def run_impl_phase(
         except Exception:
             session_state = {}
 
-    # If nothing was written, flag it (correctness will score it via verify anyway).
-    if not any(build_dir.iterdir()):
-        notes.append("no files written in build directory after implementation")
+    if status == "complete" and not pr_id:
+        notes.append("completion detected but no PR id could be parsed from the final response")
 
     transcript.status = status
     transcript.notes = notes
@@ -153,6 +167,7 @@ def run_impl_phase(
         turns=turns,
         status=status,
         final_text=final_text,
+        pr_id=pr_id,
         notes=notes,
     )
 

@@ -2,9 +2,9 @@
 
 Cost-efficiency benchmark for **planner × implementer** LLM duos, run over Pi RPC.
 
-Duobench takes one realistic user task prompt, runs each planner model to explore the local repository and produce a handoff plan, then runs every planner × implementer pairing against that plan. A judge panel scores each result. Cost is captured per phase, including cached-token usage when Pi reports it; charts show the cost/quality trade-off. Nothing about "challenger vs flagship" is baked in — you measure whatever combinations you list in config.
+Duobench takes one GitHub issue, runs each planner model to inspect the issue/repository and produce a handoff plan, then runs every planner × implementer pairing. Each implementer works in an isolated git worktree and is responsible for fetching the issue with `gh`, making changes, committing, pushing, opening a PR, and returning only the PR id. A judge panel reviews each PR with local git/`gh` access. Cost is captured per phase, including cached-token usage when Pi reports it; charts show the cost/quality trade-off. Nothing about "challenger vs flagship" is baked in — you measure whatever combinations you list in config.
 
-By default, the user task is a small MiniDesk browser-app benchmark. Override it with `--prompt` or `--prompt-file`.
+Real runs require the `gh` CLI installed/authenticated and a git repository with push/PR permissions.
 
 See `DESIGN.md` for the full design rationale.
 
@@ -72,20 +72,20 @@ For a copy/paste prompt you can give to a cloud coding agent, see
 # preview the full matrix presentation with synthetic plans/builds/scores (no API spend)
 uv run duobench run --dry-run --models kimi-k2.6,gpt-5.5 --trials 1
 
-# simplest real benchmark: every model plans once, then every planner×implementer pair builds
-uv run duobench run --models kimi-k2.6,gpt-5.5,claude-opus-4.8 --trials 1
+# simplest real benchmark: every model plans once, then every planner×implementer pair opens a PR
+uv run duobench run --issue https://github.com/org/repo/issues/123 --models kimi-k2.6,gpt-5.5,claude-opus-4.8 --trials 1
 
-# shorthand form with a realistic task prompt
-uv run duobench --prompt 'fix the issue described here: ...paste issue text...' --models kimi-k2.6,gpt-5.5 --trials 1
+# shorthand form with a GitHub issue
+uv run duobench --issue https://github.com/org/repo/issues/123 --models kimi-k2.6,gpt-5.5 --trials 1
 
 # rectangular matrix: only these planners crossed with only these implementers
-uv run duobench run --planners kimi-k2.6,gpt-5.5 --implementers kimi-k2.6 --trials 1
+uv run duobench run --issue https://github.com/org/repo/issues/123 --planners kimi-k2.6,gpt-5.5 --implementers kimi-k2.6 --trials 1
 
 # legacy/manual mode: one explicit condition from conditions.yaml
-uv run duobench run --conditions gpt-solo --trials 1
+uv run duobench run --issue https://github.com/org/repo/issues/123 --conditions gpt-solo --trials 1
 
 # the whole conditions.yaml config, 3 trials each (for error bars)
-uv run duobench run --trials 3
+uv run duobench run --issue https://github.com/org/repo/issues/123 --trials 3
 ```
 
 ### Flags
@@ -93,8 +93,7 @@ uv run duobench run --trials 3
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--trials N` | `1` | Trials per condition (variance / error bars) |
-| `--prompt TEXT` | MiniDesk task | User task prompt given to each planner |
-| `--prompt-file PATH` | off | Read the user task prompt from a file |
+| `--issue URL` | required for real runs | GitHub issue URL/reference for agents to inspect with `gh` |
 | `--conditions a,b,c` | all from config | Comma-separated condition ids to run from `conditions.yaml` |
 | `--models a,b,c` | off | Generate a full planner×implementer matrix from model keys (N plans, N² builds per trial) |
 | `--planners a,b` | off | Planner keys for a rectangular matrix; use with `--implementers` |
@@ -118,6 +117,7 @@ Real runs can take a while. For a remote machine, prefer `tmux` and plain logs:
 tmux new-session -d -s duobench \
   'cd /path/to/agent-synergy-eval && \
    PYTHONUNBUFFERED=1 uv run duobench run \
+     --issue https://github.com/org/repo/issues/123 \
      --conditions gpt-x-kimi \
      --trials 1 \
      --no-live \
@@ -192,7 +192,7 @@ uv run duobench run --dry-run --models kimi-k2.6,gpt-5.5,claude-opus-4.8 --trial
 open runs/<timestamp>/report.html
 ```
 
-Dry-run now writes synthetic shared plans, generated MiniDesk files, transcripts, non-zero
+Dry-run writes synthetic shared plans, placeholder build artifacts, transcripts, non-zero
 configured costs from `models.yaml` pricing, varied judge scores, `results.json`, chart CSVs,
 PNGs, and the same `report.html` a real run writes.
 
@@ -224,15 +224,15 @@ you can run it from an empty experiment directory and keep outputs/config separa
 source checkout.
 
 Within a run, execution is deliberately two-stage and simple: all unique planner samples
-run first, keyed by `(planner, trial)`, then all planner×implementer builds run from those
-plans. For `--models a,b,c --trials 1`, that means 3 planner runs followed by 9
-implementation/verification runs. Condition-level cost still includes the copied planner
-cost for fair comparisons. Planner agents get local read-only Pi tools (`read`, `grep`,
-`find`, `ls`, `bash`) so they can explore the repository, but no web access is bundled.
-If your prompt references a GitHub issue URL, paste the issue text or provide it through
-`--prompt-file` for now.
+run first, keyed by `(planner, trial)`, then all planner×implementer PR attempts run from
+those plans. For `--models a,b,c --trials 1`, that means 3 planner runs followed by 9
+implementation/PR runs. Condition-level cost still includes the copied planner cost for
+fair comparisons. Planner agents get local read-only Pi tools (`read`, `grep`, `find`,
+`ls`, `bash`) so they can explore the repository and inspect the issue with `gh`.
+Implementers run in isolated git worktrees and must create branches, commits, pushes, and
+PRs themselves.
 
-Planner jobs and condition build/verify jobs run with bounded concurrency by default
+Planner jobs and condition implementation/PR jobs run with bounded concurrency by default
 (`--parallel auto`, currently up to 2 workers). Use `--parallel all` to launch every job in
 each phase concurrently, `--parallel 1` for fully serial runs, or `--parallel N` to set an
 explicit global cap. Judging remains serial for now.
@@ -240,7 +240,7 @@ explicit global cap. Judging remains serial for now.
 Each run writes `runs/<timestamp>/`:
 
 ```
-report.html       visual run report: builds, screenshots, agent threads, timing/tokens/cost
+report.html       visual run report: PR metadata, agent threads, timing/tokens/cost
 shared-plans/<planner>/trial-<n>/
   plan.md                    shared planner output used by matching conditions
   shared-plan.json           planner/cost/source metadata
@@ -251,9 +251,8 @@ conditions/<id>/trial-<n>/
   implementer-transcript.json raw implementer turns + tool/message stats
   implementer-events.jsonl   raw Pi RPC events from the implementer session
   judge-transcripts/         one raw judge thread per judge model (+ *.events.jsonl)
-  build/                     implementer's MiniDesk files (index.html at root)
-  screenshots/               desktop + per-app launch shots
-  verify.json                Playwright smoke signals
+  worktree/                  isolated git worktree used by the implementer
+  verify.json                PR/worktree metadata
   trial.json                 record + judge meta/scores
 results.json                 aggregated scores
 results/                     leaderboard, dimension-radar, cost-vs-quality, self-bias (PNG + CSV)
@@ -268,11 +267,11 @@ uv run duobench report runs/<timestamp>
 ## Scoring
 
 Judges score task-agnostic dimensions 1–10 (`task_completion`, `correctness`,
-`code_quality`, `verification`), averaged across the panel. The judge receives the user
-task, planner handoff, implementation diff/status or source snapshot, verification output,
-and screenshots when available. `cost_efficiency` is computed objectively (quality ÷ $) —
-not judged. A self-bias matrix shows each judge's score per build to surface a model
-favoring its own work.
+`code_quality`, `verification`), averaged across the panel. The judge receives the GitHub
+issue URL, planner handoff, implementer-returned PR id, and harness metadata. The judge
+uses local git and `gh` to inspect the issue and PR. `cost_efficiency` is computed
+objectively (quality ÷ $) — not judged. A self-bias matrix shows each judge's score per PR
+to surface a model favoring its own work.
 
-For the default MiniDesk task, smoke test "boots OK" = desktop + taskbar render, no fatal
-console error, and ≥3 apps launch.
+Judges use local git and `gh` to inspect the issue and PR. They should not comment, review,
+merge, close, push, or otherwise mutate the PR.
