@@ -27,6 +27,7 @@ from duobench.charts import generate_charts
 from duobench.config import Condition, Config, ConfigError, Model, load_config
 from duobench.cost import PhaseCost, compute_cost
 from duobench.judge import DIMENSIONS, JudgeScore, average_dimensions, judge_panel
+from duobench.pi_rpc import PiSession
 from duobench.plan_phase import run_plan_phase
 from duobench.impl_phase import run_impl_phase
 from duobench.verify import verify_build
@@ -102,10 +103,11 @@ def _load_issue_url(issue: str, *, dry_run: bool) -> str:
 
 
 def validate_pi_models(model_specs: list[str], *, timeout: float = 60.0, ui=None) -> None:
-    # Pi's --model flag accepts the thinking label, but we drive it explicitly
-    # via set_thinking() in each phase, so strip it before deduping — specs that
-    # differ only in thinking level validate the same underlying model once.
-    for spec in _dedupe_ordered([s.partition(":")[0] for s in model_specs]):
+    # Validate with the full spec (including thinking label): some models
+    # (e.g. minimax/MiniMax-M3) return empty final text with thinking off,
+    # which would fail validation even though the benchmark phases always
+    # set a thinking level explicitly.
+    for spec in _dedupe_ordered(model_specs):
         if ui:
             ui.log(f"validating Pi model: {spec}")
         try:
@@ -1016,7 +1018,13 @@ def _main() -> None:
     ui.log(f"phase plan: {plan_jobs} shared planner run(s) → PR: {impl_jobs} implementation run(s) → judge: {judge_jobs} judge run(s)")
     ui.log(f"Pi sessions: {'saved with descriptive names' if args.pi_sessions and not args.dry_run else 'not saved'}")
     if not args.dry_run and not args.skip_model_check:
-        validate_pi_models([*(c.planner for c in conditions), *(c.implementer for c in conditions), *cfg.judges], ui=ui)
+        # Resolve registry aliases (e.g. `kimi-k2.6`) to full Pi specs before
+        # validating — Pi cannot resolve bare registry keys itself.
+        def _pi_spec(key: str) -> str:
+            m = cfg.model(key)
+            spec = f"{m.provider}/{m.model_id}" if m.provider else m.model_id
+            return f"{spec}:{m.thinking_level}" if m.thinking_level else spec
+        validate_pi_models([_pi_spec(k) for k in (*(c.planner for c in conditions), *(c.implementer for c in conditions), *cfg.judges)], ui=ui)
     ui.log("conditions:")
     unknown_models: set[str] = set()
     for c in conditions:
