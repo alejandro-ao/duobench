@@ -192,8 +192,26 @@ def load_config(
         cid = str(c["id"])
         _require(cid not in seen_ids, f"duplicate condition id: '{cid}'")
         seen_ids.add(cid)
-        _require(c["planner"] in models, f"condition '{cid}': planner '{c['planner']}' not in models")
-        _require(c["implementer"] in models, f"condition '{cid}': implementer '{c['implementer']}' not in models")
-        conditions.append(Condition(id=cid, planner=str(c["planner"]), implementer=str(c["implementer"])))
+        # planner/implementer accept either a registry key OR a direct Pi spec
+        # (e.g. `kimi-coding/kimi-for-coding` or `kimi-coding/kimi-for-coding:high`).
+        # Validate the thinking suffix here so typos fail fast.
+        for role in ("planner", "implementer"):
+            value = str(c[role])
+            spec, _, suffix = value.partition(":")
+            if spec not in models and "/" not in spec:
+                raise ConfigError(
+                    f"condition '{cid}': {role} '{value}' is not a known model key and "
+                    f"has no provider prefix; register it in models.yaml or use the "
+                    f"'provider/model_id' form"
+                )
+            if suffix:
+                _validate_thinking(suffix)
+        conditions.append(
+            Condition(
+                id=cid,
+                planner=str(c["planner"]),
+                implementer=str(c["implementer"]),
+            )
+        )
 
     return Config(models=models, judges=list(judges), conditions=conditions, costs=costs)

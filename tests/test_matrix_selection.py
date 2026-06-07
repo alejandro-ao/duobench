@@ -1,6 +1,6 @@
 import pytest
 
-from duobench.config import Condition, Config, ConfigError, Model, Pricing
+from duobench.config import Condition, Config, ConfigError, Model, Pricing, load_config
 from duobench.run import make_matrix_conditions, select_run_conditions
 
 
@@ -71,3 +71,55 @@ def test_model_spec_thinking_suffix_is_extracted_from_config():
 
     with pytest.raises(ConfigError, match="unknown thinking level"):
         cfg.model("kimi:banana")
+
+
+def test_conditions_yaml_accepts_direct_pi_specs(tmp_path):
+    conditions_yaml = tmp_path / "conditions.yaml"
+    conditions_yaml.write_text(
+        "conditions:\n"
+        "  - id: gpt-x-kimi\n"
+        "    planner: openai-codex/gpt-5.5:high\n"
+        "    implementer: kimi-k2.6\n"
+    )
+    cfg = load_config(
+        models_path="config/models.yaml",
+        conditions_path=conditions_yaml,
+        costs_path=tmp_path / "missing-costs.yaml",
+    )
+    cond = cfg.conditions[0]
+    assert cond.id == "gpt-x-kimi"
+    assert cond.planner == "openai-codex/gpt-5.5:high"
+    assert cfg.model(cond.planner).provider == "openai-codex"
+    assert cfg.model(cond.planner).thinking_level == "high"
+
+
+def test_conditions_yaml_accepts_registry_keys_with_thinking_suffix(tmp_path):
+    conditions_yaml = tmp_path / "conditions.yaml"
+    conditions_yaml.write_text(
+        "conditions:\n"
+        "  - id: kimi-override\n"
+        "    planner: kimi-k2.6:low\n"
+        "    implementer: kimi-k2.6\n"
+    )
+    cfg = load_config(
+        models_path="config/models.yaml",
+        conditions_path=conditions_yaml,
+        costs_path=tmp_path / "missing-costs.yaml",
+    )
+    assert cfg.model(cfg.conditions[0].planner).thinking_level == "low"
+
+
+def test_conditions_yaml_rejects_unknown_key_without_provider(tmp_path):
+    conditions_yaml = tmp_path / "conditions.yaml"
+    conditions_yaml.write_text(
+        "conditions:\n"
+        "  - id: typo-cond\n"
+        "    planner: typo-model\n"
+        "    implementer: kimi\n"
+    )
+    with pytest.raises(ConfigError, match="not a known model key"):
+        load_config(
+            models_path="config/models.yaml",
+            conditions_path=conditions_yaml,
+            costs_path=tmp_path / "missing-costs.yaml",
+        )
