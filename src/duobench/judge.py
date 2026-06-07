@@ -157,12 +157,14 @@ def judge_build(
         raw_events_path=raw_events_path,
         persist_session=persist_pi_session,
         session_name=session_name,
+        initial_model=judge_model.model_id if not judge_model.provider else None,
     ) as s:
-        s.set_model(judge_model.provider, judge_model.model_id)
+        if judge_model.provider:
+            s.set_model(judge_model.provider, judge_model.model_id)
         if judge_model.thinking_level is not None:
             s.set_thinking(judge_model.thinking_level)
-        else:
-            s.set_thinking("off")  # determinism best-effort fallback
+        elif judge_model.provider:
+            s.set_thinking("off")  # determinism best-effort fallback for legacy config models
         try:
             # Try with images first; fall back to text-only if the build/model rejects it.
             try:

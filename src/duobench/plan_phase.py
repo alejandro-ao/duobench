@@ -42,11 +42,13 @@ def run_plan_phase(
         raw_events_path=out_dir / "planner-events.jsonl",
         persist_session=persist_pi_session,
         session_name=session_name,
+        initial_model=planner.model_id if not planner.provider else None,
     ) as s:
-        s.set_model(planner.provider, planner.model_id)
+        if planner.provider:
+            s.set_model(planner.provider, planner.model_id)
         if thinking_level is not None:
             s.set_thinking(thinking_level)
-        elif pin_temperature:
+        elif pin_temperature and planner.provider:
             s.set_thinking("off")
         started = time.time()
         result = s.prompt(architect_prompt, timeout=timeout)

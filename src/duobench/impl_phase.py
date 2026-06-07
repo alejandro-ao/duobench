@@ -101,11 +101,13 @@ def run_impl_phase(
         raw_events_path=build_dir.parent / "implementer-events.jsonl",
         persist_session=persist_pi_session,
         session_name=session_name,
+        initial_model=implementer.model_id if not implementer.provider else None,
     ) as s:
-        s.set_model(implementer.provider, implementer.model_id)
+        if implementer.provider:
+            s.set_model(implementer.provider, implementer.model_id)
         if thinking_level is not None:
             s.set_thinking(thinking_level)
-        elif pin_temperature:
+        elif pin_temperature and implementer.provider:
             s.set_thinking("off")
         try:
             started = time.time()

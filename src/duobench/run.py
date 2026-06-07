@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
@@ -98,6 +98,21 @@ def _load_issue_url(issue: str, *, dry_run: bool) -> str:
     if dry_run:
         return DEFAULT_ISSUE_URL
     raise ConfigError("--issue is required for real runs; duobench is coupled to the GitHub issue → PR workflow")
+
+
+def validate_pi_models(model_specs: list[str], *, timeout: float = 60.0, ui=None) -> None:
+    for spec in _dedupe_ordered(model_specs):
+        if ui:
+            ui.log(f"validating Pi model: {spec}")
+        try:
+            with PiSession(cwd=Path.cwd(), enable_tools=False, persist_session=False, initial_model=spec) as s:
+                result = s.prompt("Reply with OK.", timeout=timeout)
+                if "ok" not in result.text.lower():
+                    raise ConfigError(f"model validation for {spec!r} returned unexpected response: {result.text[:120]}")
+        except Exception as e:
+            if isinstance(e, ConfigError):
+                raise
+            raise ConfigError(f"Pi model validation failed for {spec!r}: {e}") from e
 
 
 def _check_issue_prereqs(*, dry_run: bool) -> None:
@@ -295,14 +310,10 @@ def _dedupe_ordered(values: list[str]) -> list[str]:
     return out
 
 
-def _validate_model_keys(cfg: Config, keys: list[str], flag: str) -> list[str]:
+def _validate_model_specs(keys: list[str], flag: str) -> list[str]:
     keys = _dedupe_ordered(keys)
     if not keys:
-        raise ConfigError(f"{flag} must include at least one model key")
-    missing = [key for key in keys if key not in cfg.models]
-    if missing:
-        known = ", ".join(cfg.models)
-        raise ConfigError(f"unknown model key(s) in {flag}: {', '.join(missing)}. Known models: {known}")
+        raise ConfigError(f"{flag} must include at least one Pi model spec")
     return keys
 
 
@@ -317,9 +328,9 @@ def select_conditions(cfg: Config, only: list[str] | None) -> list[Condition]:
 
 
 def make_matrix_conditions(cfg: Config, planners: list[str], implementers: list[str]) -> list[Condition]:
-    """Generate the full planner×implementer matrix for the requested model keys."""
-    planners = _validate_model_keys(cfg, planners, "--planners/--models")
-    implementers = _validate_model_keys(cfg, implementers, "--implementers/--models")
+    """Generate the full planner×implementer matrix for the requested Pi model specs."""
+    planners = _validate_model_specs(planners, "--planners/--models")
+    implementers = _validate_model_specs(implementers, "--implementers/--models")
     conditions: list[Condition] = []
     used_ids: set[str] = set()
     for planner in planners:
@@ -368,14 +379,14 @@ def select_run_conditions(
     if model_keys:
         if planner_keys or implementer_keys:
             raise ConfigError("--models cannot be combined with --planners or --implementers; use one style")
-        keys = _validate_model_keys(cfg, model_keys, "--models")
+        keys = _validate_model_specs(model_keys, "--models")
         return make_matrix_conditions(cfg, keys, keys), f"full matrix from --models ({len(keys)} models)"
 
     if planner_keys or implementer_keys:
         if not planner_keys or not implementer_keys:
             raise ConfigError("provide both --planners and --implementers, or use --models for a square matrix")
-        planners = _validate_model_keys(cfg, planner_keys, "--planners")
-        implementers = _validate_model_keys(cfg, implementer_keys, "--implementers")
+        planners = _validate_model_specs(planner_keys, "--planners")
+        implementers = _validate_model_specs(implementer_keys, "--implementers")
         return make_matrix_conditions(cfg, planners, implementers), (
             f"rectangular matrix from --planners/--implementers ({len(planners)}×{len(implementers)})"
         )
@@ -891,15 +902,18 @@ def _main() -> None:
     rp.add_argument("--issue", type=str, default="", help="GitHub issue URL or issue reference to fix; required for real runs")
     rp.add_argument("--conditions", type=str, default="", help="comma-separated condition ids from conditions.yaml")
     rp.add_argument("--models", type=str, default="",
-                    help="comma-separated model keys; generate the full planner×implementer matrix")
+                    help="comma-separated Pi model specs; generate the full planner×implementer matrix")
     rp.add_argument("--planners", type=str, default="",
-                    help="comma-separated planner model keys for a rectangular matrix")
+                    help="comma-separated planner Pi model specs for a rectangular matrix")
     rp.add_argument("--implementers", type=str, default="",
-                    help="comma-separated implementer model keys for a rectangular matrix")
+                    help="comma-separated implementer Pi model specs for a rectangular matrix")
+    rp.add_argument("--judges", type=str, default="",
+                    help="comma-separated judge Pi model specs; defaults to --models or models.yaml judges")
     rp.add_argument("--dry-run", action="store_true", help="stub all model calls with synthetic plans, builds, costs, and judge scores")
     rp.add_argument("--out", type=str, default="runs")
     rp.add_argument("--models-config", type=str, default="config/models.yaml")
     rp.add_argument("--conditions-config", type=str, default="config/conditions.yaml")
+    rp.add_argument("--costs-config", type=str, default="costs.yaml")
     rp.add_argument("--plan-timeout", type=float, default=600.0)
     rp.add_argument("--impl-timeout", type=float, default=1800.0)
     rp.add_argument("--judge-timeout", type=float, default=300.0)
@@ -909,6 +923,7 @@ def _main() -> None:
                     help="save real Pi RPC sessions in Pi's default session store with descriptive names")
     rp.add_argument("--live", action=argparse.BooleanOptionalAction, default=None,
                     help="enable/disable the Rich live dashboard (default: auto when attached to a TTY)")
+    rp.add_argument("--skip-model-check", action="store_true", help="skip fail-fast Pi model/auth validation")
     rp.add_argument("--debug", action="store_true", help="show full Python tracebacks on errors")
     rep = sub.add_parser("report", help="generate/re-generate report.html for an existing run")
     rep.add_argument("run_dir", type=str)
@@ -920,13 +935,18 @@ def _main() -> None:
         print(f"report written: {report_path}")
         return
 
-    cfg = load_config(args.models_config, args.conditions_config)
+    cfg = load_config(args.models_config, args.conditions_config, args.costs_config)
+    model_keys = _parse_csv(args.models)
+    planner_keys = _parse_csv(args.planners)
+    implementer_keys = _parse_csv(args.implementers)
+    judge_keys = _parse_csv(args.judges) or model_keys or cfg.judges
+    cfg = replace(cfg, judges=_validate_model_specs(judge_keys, "--judges"))
     conditions, selection_mode = select_run_conditions(
         cfg,
         condition_ids=_parse_csv(args.conditions),
-        model_keys=_parse_csv(args.models),
-        planner_keys=_parse_csv(args.planners),
-        implementer_keys=_parse_csv(args.implementers),
+        model_keys=model_keys,
+        planner_keys=planner_keys,
+        implementer_keys=implementer_keys,
     )
     parallel_workers = resolve_parallel(args.parallel)
 
@@ -959,6 +979,8 @@ def _main() -> None:
     judge_jobs = impl_jobs * len(cfg.judges)
     ui.log(f"phase plan: {plan_jobs} shared planner run(s) → PR: {impl_jobs} implementation run(s) → judge: {judge_jobs} judge run(s)")
     ui.log(f"Pi sessions: {'saved with descriptive names' if args.pi_sessions and not args.dry_run else 'not saved'}")
+    if not args.dry_run and not args.skip_model_check:
+        validate_pi_models([*(c.planner for c in conditions), *(c.implementer for c in conditions), *cfg.judges], ui=ui)
     ui.log("conditions:")
     for c in conditions:
         planner_thinking = cfg.model(c.planner).thinking_level or "default/off"

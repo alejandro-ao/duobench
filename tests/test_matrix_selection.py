@@ -44,9 +44,9 @@ def test_explicit_conditions_still_use_conditions_config():
     assert conditions == [Condition("kimi-x-gpt", "kimi", "gpt")]
 
 
-def test_matrix_selection_rejects_unknown_models_and_mixed_styles():
-    with pytest.raises(ConfigError):
-        make_matrix_conditions(_cfg(), ["missing"], ["kimi"])
+def test_matrix_selection_accepts_direct_pi_specs_and_rejects_mixed_styles():
+    conditions = make_matrix_conditions(_cfg(), ["missing-model:high"], ["kimi"])
+    assert conditions[0].planner == "missing-model:high"
     with pytest.raises(ConfigError):
         select_run_conditions(_cfg(), condition_ids=["kimi-x-gpt"], model_keys=["kimi"])
     with pytest.raises(ConfigError):
