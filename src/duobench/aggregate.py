@@ -42,6 +42,8 @@ class TrialRecord:
     # raw per-judge dimension scores for self-bias: {judge_key: {dim: int}}
     per_judge: dict[str, dict[str, float]] = field(default_factory=dict)
     impl_status: str = "complete"
+    # "pi_reported" | "configured" | "unknown" — see cost.compute_cost()
+    cost_source: str = "unknown"
 
 
 def _mean(xs: list[float]) -> float:
@@ -50,6 +52,20 @@ def _mean(xs: list[float]) -> float:
 
 def _std(xs: list[float]) -> float:
     return round(statistics.pstdev(xs), 4) if len(xs) > 1 else 0.0
+
+
+def _majority_source(records: list[TrialRecord]) -> str:
+    """Return the most common cost source across trials.
+
+    Defaults to 'unknown' when no per-trial source was recorded. The
+    `source` attribute on TrialRecord is set by TrialRecord; trials that
+    didn't go through compute_cost() (older transcripts) leave it unset.
+    """
+    sources = [getattr(r, "cost_source", None) for r in records]
+    sources = [s for s in sources if s]
+    if not sources:
+        return "unknown"
+    return statistics.mode(sources)
 
 
 def aggregate(records: list[TrialRecord], judges: list[str]) -> dict:
@@ -83,6 +99,7 @@ def aggregate(records: list[TrialRecord], judges: list[str]) -> dict:
             "cost_efficiency": round(quality / cost_usd, 4) if cost_usd > 0 else 0.0,
             "trials": len(trs),
             "impl_statuses": [t.impl_status for t in trs],
+            "cost_source": _majority_source(trs),
         }
 
     # Self-bias: for each judge, its average overall score per condition.

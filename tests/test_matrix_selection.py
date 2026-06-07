@@ -1,5 +1,6 @@
 import pytest
 
+from duobench.aggregate import TrialRecord, aggregate
 from duobench.config import Condition, Config, ConfigError, Model, Pricing, load_config
 from duobench.run import make_matrix_conditions, select_run_conditions
 
@@ -123,3 +124,44 @@ def test_conditions_yaml_rejects_unknown_key_without_provider(tmp_path):
             conditions_path=conditions_yaml,
             costs_path=tmp_path / "missing-costs.yaml",
         )
+
+
+def test_aggregate_records_cost_source_per_condition():
+    records = [
+        TrialRecord(
+            condition_id="c1",
+            planner="a",
+            implementer="b",
+            trial=0,
+            cost_usd=0.0,
+            dimensions={d: 7.0 for d in ("task_completion", "correctness", "code_quality", "verification")},
+            cost_source="unknown",
+        ),
+        TrialRecord(
+            condition_id="c2",
+            planner="a",
+            implementer="b",
+            trial=0,
+            cost_usd=0.5,
+            dimensions={d: 7.0 for d in ("task_completion", "correctness", "code_quality", "verification")},
+            cost_source="configured",
+        ),
+    ]
+    results = aggregate(records, ["a"])
+    assert results["conditions"]["c1"]["cost_source"] == "unknown"
+    assert results["conditions"]["c2"]["cost_source"] == "configured"
+
+
+def test_aggregate_defaults_cost_source_to_unknown_when_missing():
+    records = [
+        TrialRecord(
+            condition_id="c1",
+            planner="a",
+            implementer="b",
+            trial=0,
+            cost_usd=0.0,
+            dimensions={d: 7.0 for d in ("task_completion", "correctness", "code_quality", "verification")},
+        ),
+    ]
+    results = aggregate(records, ["a"])
+    assert results["conditions"]["c1"]["cost_source"] == "unknown"

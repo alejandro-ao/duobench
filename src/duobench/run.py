@@ -140,6 +140,34 @@ def _is_unknown_model(model: Model, spec: str) -> bool:
     return "/" in spec or ":" in spec or model.provider == ""
 
 
+def _cost_source_for(model: Model, cost_usd: float) -> str:
+    """Best-effort reconstruction of the cost source for a phase result.
+
+    compute_cost() chooses between 'pi_reported', 'configured', and
+    'unknown'. We don't always have a PhaseCost object here (e.g. shared
+    plan only stashes cost_usd), so derive the source from what we know.
+    """
+    if cost_usd > 0 and model.pricing is not None:
+        return "configured"
+    if model.pricing is not None:
+        return "configured"
+    return "unknown"
+
+
+def _merge_cost_source(*sources: str) -> str:
+    """Combine per-phase cost sources into a single label for the trial.
+
+    Priority: any 'unknown' dominates (the user can't trust the dollar
+    number); then 'configured'; then 'pi_reported'. This way the warning
+    banner surfaces the weakest source for the trial.
+    """
+    if any(s == "unknown" for s in sources):
+        return "unknown"
+    if any(s == "configured" for s in sources):
+        return "configured"
+    return "pi_reported"
+
+
 def _issue_url_from(prompts: dict[str, str]) -> str:
     return prompts.get("issue_url", DEFAULT_ISSUE_URL)
 
@@ -648,6 +676,8 @@ def run_condition_trial(
     copy_plan_artifacts(shared_plan, trial_dir)
     plan_text = shared_plan.plan_text
     plan_cost = shared_plan.cost_usd
+    planner = cfg.model(cond.planner)
+    plan_source = _cost_source_for(planner, plan_cost)
 
     # --- implement ---
     if dry_run:
@@ -667,6 +697,7 @@ def run_condition_trial(
             tool_calls=_stable_int(f"{cond.id}:impl:{trial}:tools", 4, 24),
         )
         impl_cost = ic.usd
+        impl_source = ic.source
         impl_status = "complete"
         pr_id = "1"
     else:
@@ -685,6 +716,7 @@ def run_condition_trial(
             ui=ui,
         )
         impl_cost = impl.cost.usd
+        impl_source = impl.cost.source
         impl_status = impl.status
         pr_id = impl.pr_id
 
@@ -721,6 +753,7 @@ def run_condition_trial(
         dimensions={d: 0.0 for d in DIMENSIONS},   # filled after judging
         per_judge={},
         impl_status=impl_status,
+        cost_source=_merge_cost_source(plan_source, impl_source),
     )
     # stash paths for the judging pass
     record_meta = {
@@ -1144,9 +1177,21 @@ def _main() -> None:
         print("Pi sessions: saved in Pi's default session store; paths are recorded in transcripts/report.html")
     # leaderboard preview
     ranked = sorted(results["conditions"].items(), key=lambda kv: kv[1]["quality"], reverse=True)
-    print("\nleaderboard (quality | cost$ | efficiency):")
+    print("\nleaderboard (quality | cost$ | cost-source | efficiency):")
+    unknown_pricing: list[str] = []
     for cid, c in ranked:
-        print(f"  {cid:14} {c['quality']:5.2f} | {c['cost_usd']:.4f} | {c['cost_efficiency']:.2f}")
+        source = c.get("cost_source", "unknown")
+        if source == "unknown":
+            unknown_pricing.append(cid)
+        print(f"  {cid:14} {c['quality']:5.2f} | {c['cost_usd']:.4f} | {source:12} | {c['cost_efficiency']:.2f}")
+    if unknown_pricing:
+        print(
+            "\nwarning: cost$ is 0.0000 with source 'unknown' for: "
+            + ", ".join(unknown_pricing)
+            + ". Add the model keys to config/models.yaml (pricing block) or create "
+              "a costs.yaml with rates for those keys. cost_efficiency is meaningless "
+              "until pricing is set."
+        )
 
 
 def main() -> None:

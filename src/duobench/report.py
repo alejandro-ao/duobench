@@ -93,7 +93,18 @@ def generate_report(run_dir: Path) -> Path:
     if results.get("conditions"):
         body.append("<h3>Leaderboard</h3>")
         for cid, data in sorted(results["conditions"].items(), key=lambda kv: kv[1].get("quality", 0), reverse=True):
-            body.append(f"<div class='metric'><b>{html.escape(cid)}</b><span class='muted'>quality {data.get('quality',0)} · cost {_fmt_usd(data.get('cost_usd',0))}</span></div>")
+            source = data.get("cost_source", "unknown")
+            if source == "unknown":
+                body.append(
+                    f"<div class='metric'><b>{html.escape(cid)}</b>"
+                    f"<span class='muted'>quality {data.get('quality',0)} · cost {_fmt_usd(data.get('cost_usd',0))}</span>"
+                    f"<span class='bad'>pricing unknown \u2014 add to models.yaml or costs.yaml</span></div>"
+                )
+            else:
+                body.append(
+                    f"<div class='metric'><b>{html.escape(cid)}</b>"
+                    f"<span class='muted'>quality {data.get('quality',0)} · cost {_fmt_usd(data.get('cost_usd',0))} \u00b7 {html.escape(source)}</span></div>"
+                )
     for td in trial_dirs:
         anchor = td.relative_to(run_dir).as_posix().replace("/", "-")
         nav.append(f"<a href='#{html.escape(anchor)}'>{html.escape(td.parent.name)} / {html.escape(td.name)}</a>")
