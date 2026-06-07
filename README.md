@@ -94,7 +94,7 @@ uv run duobench \
 ```bash
 uv run duobench \
   --issue https://github.com/org/repo/issues/123 \
-  --models kimi-k2.6,gpt-5.5,claude-opus-4.8 \
+  --models openai-codex/gpt-5.5:high,kimi-coding/kimi-for-coding:high,anthropic/claude-opus-4.8 \
   --trials 1
 ```
 
@@ -109,11 +109,11 @@ With three models and one trial, this runs:
 ## Common Commands
 
 ```bash
-# Full planner × implementer matrix from model keys
-uv run duobench --issue https://github.com/org/repo/issues/123 --models kimi-k2.6,gpt-5.5 --trials 1
+# Full planner × implementer matrix from Pi model specs
+uv run duobench --issue https://github.com/org/repo/issues/123 --models openai-codex/gpt-5.5:high,kimi-coding/kimi-for-coding:high --trials 1
 
 # Rectangular matrix: selected planners crossed with selected implementers
-uv run duobench --issue https://github.com/org/repo/issues/123 --planners kimi-k2.6,gpt-5.5 --implementers kimi-k2.6 --trials 1
+uv run duobench --issue https://github.com/org/repo/issues/123 --planners openai-codex/gpt-5.5:high,kimi-coding/kimi-for-coding:high --implementers kimi-coding/kimi-for-coding:high --trials 1
 
 # Explicit conditions from config/conditions.yaml
 uv run duobench --issue https://github.com/org/repo/issues/123 --conditions gpt-x-kimi --trials 1
@@ -134,78 +134,70 @@ uv run duobench report runs/<timestamp>
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--issue URL` | required for real runs | GitHub issue URL/reference. Agents fetch it themselves with `gh`. |
-| `--models a,b,c` | off | Generate full planner × implementer matrix. |
-| `--planners a,b` | off | Planner model keys for rectangular matrix. Use with `--implementers`. |
-| `--implementers a,b` | off | Implementer model keys for rectangular matrix. Use with `--planners`. |
+| `--models a,b,c` | off | Generate full planner × implementer matrix from Pi model specs. |
+| `--planners a,b` | off | Planner Pi model specs for rectangular matrix. Use with `--implementers`. |
+| `--implementers a,b` | off | Implementer Pi model specs for rectangular matrix. Use with `--planners`. |
+| `--judges a,b` | `--models` or config judges | Judge Pi model specs. |
 | `--conditions a,b` | all config conditions | Run named condition IDs from `conditions.yaml`. |
 | `--trials N` | `1` | Trials per condition. |
 | `--parallel auto\|all\|N` | `auto` | Planner/implementation concurrency. Use `1` for serial. |
 | `--dry-run` | off | Stub model calls and generate synthetic outputs. |
 | `--out DIR` | `runs` | Output directory root. |
-| `--models-config PATH` | `config/models.yaml` | Model registry path. |
+| `--models-config PATH` | `config/models.yaml` | Optional legacy model registry / default judges. |
 | `--conditions-config PATH` | `config/conditions.yaml` | Condition preset path. |
+| `--costs-config PATH` | `costs.yaml` | Optional fallback pricing when Pi does not report cost. |
 | `--plan-timeout SEC` | `600` | Planner wall-clock timeout. |
 | `--impl-timeout SEC` | `1800` | Implementer wall-clock timeout. |
 | `--judge-timeout SEC` | `300` | Per-judge timeout. |
 | `--pi-sessions` / `--no-pi-sessions` | on | Save Pi sessions in Pi's normal session store. |
 | `--live` / `--no-live` | auto | Rich live dashboard. |
+| `--skip-model-check` | off | Skip fail-fast Pi model/auth validation. |
 
 ---
 
-## Configuration
+## Models and Costs
 
-Duobench uses two YAML files.
+### Model specs are Pi model specs
 
-### `config/models.yaml`
+`--models`, `--planners`, `--implementers`, and `--judges` accept the same model specs you would pass to Pi's `--model` flag, including thinking labels:
 
-Model registry plus judge panel:
+```bash
+--models openai-codex/gpt-5.5:high,kimi-coding/kimi-for-coding:high
+```
+
+There is no required duobench model alias layer for normal use. Before a real benchmark starts, duobench validates each unique model by launching Pi with that model and asking it to reply `OK`. Use `--skip-model-check` only if you intentionally want to bypass that fail-fast auth/model check.
+
+### Cost accounting
+
+Duobench prefers Pi/provider-reported cost when available. If Pi does not report cost, duobench falls back to optional configured rates from `costs.yaml`. Rates are dollars per million tokens:
 
 ```yaml
 models:
-  kimi-k2.6:
-    provider: kimi-coding
-    model_id: kimi-for-coding
-    thinking: high
-    pricing:
-      input: 0.95
-      output: 4.00
+  openai-codex/gpt-5.5:high:
+    input: 5.00
+    output: 30.00
 
-  gpt-5.5:
-    provider: openai-codex
-    model_id: gpt-5.5
-    thinking: off
-    pricing:
-      input: 5.00
-      output: 30.00
-
-judges:
-  - kimi-k2.6
-  - gpt-5.5
+  kimi-coding/kimi-for-coding:high:
+    input: 0.95
+    output: 4.00
+    cache_read: 0.15
+    cache_write: 0.95
 ```
 
-Notes:
+If neither Pi nor `costs.yaml` provides cost information, duobench records cost as `0` with source `unknown`.
 
-- `provider` and `model_id` are passed directly to Pi RPC `set_model`.
-- `thinking` is optional: `off|minimal|low|medium|high|xhigh`.
-- `pricing` is dollars per million tokens.
-- Optional `cache_read` and `cache_write` rates are supported.
+### Optional config files
 
-### `config/conditions.yaml`
-
-Named manual pairings:
+`config/conditions.yaml` is still useful for named manual pairings:
 
 ```yaml
 conditions:
-  - id: kimi-solo
-    planner: kimi-k2.6
-    implementer: kimi-k2.6
-
   - id: gpt-x-kimi
-    planner: gpt-5.5
-    implementer: kimi-k2.6
+    planner: openai-codex/gpt-5.5:high
+    implementer: kimi-coding/kimi-for-coding:high
 ```
 
-For most experiments, use `--models` instead of manually listing every pair.
+`config/models.yaml` remains supported mainly for packaged defaults, legacy condition aliases, and default judges. For most new experiments, prefer direct Pi model specs in the CLI plus optional `costs.yaml`.
 
 ---
 
