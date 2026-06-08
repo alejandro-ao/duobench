@@ -317,6 +317,7 @@ def test_gh_wrapper_allows_read_only_issue_and_pr_view(tmp_path):
             text=True,
         )
         combined = (res.stdout + res.stderr).lower()
+        assert res.returncode == 0, combined
         assert "disabled" not in combined, f"gh {' '.join(args)} was incorrectly blocked: {res.stdout=}\n{res.stderr=}"
 
 
@@ -484,6 +485,9 @@ def test_run_condition_trial_local_commit_records_commit_artifact(tmp_path, monk
     payload = __import__("json").loads((trial_dir / "trial.json").read_text())
     assert payload["artifacts"]["submission_mode"] == "local_commit"
     assert payload["artifacts"]["commit"]["sha"] == sha
+    verify = __import__("json").loads((trial_dir / "verify.json").read_text())
+    assert verify["commit"]["commit_sha"] == sha
+    assert "x.txt" in verify["commit"]["diff"]
 
 
 # --- shared helper ---------------------------------------------------------

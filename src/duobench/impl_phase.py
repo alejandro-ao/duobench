@@ -98,10 +98,27 @@ def _looks_pr_done(text: str) -> bool:
 
 
 def _looks_commit_done(text: str) -> bool:
-    if extract_commit_sha(text):
-        return True
-    low = text.lower()
-    return any(m in low for m in _COMMIT_DONE_MARKERS)
+    return bool(extract_commit_sha(text))
+
+
+def _git_stdout(args: list[str], cwd: Path, *, timeout: float = 15.0) -> str:
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout,
+    )
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def _detect_current_commit_sha(build_dir: Path, initial_head: str = "") -> str:
+    """Return HEAD when the implementer created a new local commit."""
+    head = _git_stdout(["rev-parse", "HEAD"], build_dir)
+    if not head or (initial_head and head == initial_head):
+        return ""
+    return head
 
 
 def _detect_existing_pr_id(build_dir: Path) -> str:
@@ -174,6 +191,7 @@ def run_impl_phase(
 
     build_dir.mkdir(parents=True, exist_ok=True)
     prompt = implement_prompt_template.replace("{plan}", plan_text)
+    initial_head = _git_stdout(["rev-parse", "HEAD"], build_dir)
 
     total = Usage()
     turns = 0
@@ -236,14 +254,14 @@ def run_impl_phase(
                 ui.add_turn_result(result.usage, turn_cost.usd, turn_cost.reported_usd)
             final_text = result.text
             if submission_mode == "local_commit":
-                commit_sha = extract_commit_sha(result.text)
+                commit_sha = extract_commit_sha(result.text) or _detect_current_commit_sha(build_dir, initial_head)
             else:
                 pr_id = extract_pr_id(result.text)
                 if not pr_id and not looks_done(result.text):
                     pr_id = _detect_existing_pr_id(build_dir)
                     if pr_id:
                         notes.append("completion detected from existing PR rather than final response text")
-            if looks_done(result.text):
+            if looks_done(result.text) or (submission_mode == "local_commit" and commit_sha):
                 status = "complete"
             elif pr_id:
                 status = "complete"
@@ -269,14 +287,18 @@ def run_impl_phase(
                         ui.add_turn_result(result.usage, turn_cost.usd, turn_cost.reported_usd)
                     final_text = result.text
                     if submission_mode == "local_commit":
-                        commit_sha = extract_commit_sha(result.text) or commit_sha
+                        commit_sha = (
+                            extract_commit_sha(result.text)
+                            or commit_sha
+                            or _detect_current_commit_sha(build_dir, initial_head)
+                        )
                     else:
                         pr_id = extract_pr_id(result.text) or pr_id
                         if not pr_id and not looks_done(result.text):
                             pr_id = _detect_existing_pr_id(build_dir)
                             if pr_id:
                                 notes.append("completion detected from existing PR rather than final response text")
-                    if looks_done(result.text):
+                    if looks_done(result.text) or (submission_mode == "local_commit" and commit_sha):
                         status = "complete"
                         break
                     if pr_id:

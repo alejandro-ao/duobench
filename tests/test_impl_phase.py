@@ -1,5 +1,5 @@
 from duobench.config import Model, Pricing
-from duobench.impl_phase import _detect_existing_pr_id, run_impl_phase
+from duobench.impl_phase import _detect_existing_pr_id, extract_commit_sha, run_impl_phase
 from duobench.pi_rpc import PiRpcStalled, TurnResult, Usage
 
 
@@ -106,3 +106,39 @@ def test_detect_existing_pr_id_reads_current_branch_pr(tmp_path, monkeypatch):
         "--limit",
         "1",
     ]
+
+
+def test_extract_commit_sha_ignores_plain_completion_words():
+    assert extract_commit_sha("committed") == ""
+    assert extract_commit_sha("created commit") == ""
+    assert extract_commit_sha("commit 1234567") == "1234567"
+
+
+def test_impl_phase_infers_new_head_when_agent_says_committed(tmp_path, monkeypatch):
+    import subprocess
+    import duobench.impl_phase as impl_mod
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+    (repo / "base.txt").write_text("base\n")
+    subprocess.run(["git", "add", "base.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=repo, check=True)
+
+    class CommitSession(_FakeSession):
+        def prompt(self, message, *, timeout, idle_timeout=None):
+            (repo / "change.txt").write_text("change\n")
+            subprocess.run(["git", "add", "change.txt"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "change"], cwd=repo, check=True)
+            return TurnResult("committed", Usage(output=3))
+
+    CommitSession.prompt_results = []
+    CommitSession.follow_up_results = []
+    monkeypatch.setattr(impl_mod, "PiSession", CommitSession)
+
+    result = run_impl_phase(_model(), "{plan}", "plan", repo, timeout=30)
+
+    assert result.status == "complete"
+    assert len(result.commit_sha) == 40

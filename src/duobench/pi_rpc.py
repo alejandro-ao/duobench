@@ -121,6 +121,7 @@ class PiSession:
         raw_events_path: str | Path | None = None,
         persist_session: bool = False,
         session_name: str | None = None,
+        extra_path: str | Path | None = None,
     ) -> None:
         self.cwd = str(cwd)
         self.enable_tools = enable_tools
@@ -133,6 +134,7 @@ class PiSession:
         self.raw_events_path = Path(raw_events_path) if raw_events_path else None
         self.persist_session = persist_session
         self.session_name = session_name
+        self.extra_path = str(extra_path) if extra_path else ""
         self._raw_events_lock = threading.Lock()
         self._proc: subprocess.Popen | None = None
         self._events: "Queue[dict]" = Queue()
@@ -167,6 +169,8 @@ class PiSession:
         env["GIT_CEILING_DIRECTORIES"] = (
             f"{cwd_parent}{os.pathsep}{existing_ceiling}" if existing_ceiling else cwd_parent
         )
+        if self.extra_path:
+            env["PATH"] = f"{self.extra_path}{os.pathsep}{env.get('PATH', '')}"
         self._proc = subprocess.Popen(
             args,
             stdin=subprocess.PIPE,

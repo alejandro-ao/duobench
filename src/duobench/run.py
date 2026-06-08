@@ -512,7 +512,7 @@ if [ "${DUOBENCH_BLOCK_GIT_PUSH:-1}" = "1" ]; then
     esac
   done
 fi
-exec /usr/bin/env -i PATH="/usr/local/bin:/usr/bin:/bin" HOME="$HOME" git "$@"
+exec "__DUOBENCH_REAL_GIT__" "$@"
 """
 
 _GH_WRAPPER_BODY = """#!/bin/sh
@@ -554,7 +554,7 @@ if [ "${DUOBENCH_BLOCK_GH_PR:-1}" = "1" ]; then
     esac
   fi
 fi
-exec /usr/bin/env -i PATH="/usr/local/bin:/usr/bin:/bin" HOME="$HOME" gh "$@"
+exec "__DUOBENCH_REAL_GH__" "$@"
 """
 
 
@@ -569,7 +569,13 @@ def _install_local_commit_safety(worktree_dir: Path) -> Path:
     """
     bin_dir = worktree_dir / ".duobench-bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
-    for name, body in (("git", _GIT_WRAPPER_BODY), ("gh", _GH_WRAPPER_BODY)):
+    git_bin = shutil.which("git") or "git"
+    gh_bin = shutil.which("gh") or "gh"
+    wrappers = (
+        ("git", _GIT_WRAPPER_BODY.replace("__DUOBENCH_REAL_GIT__", git_bin)),
+        ("gh", _GH_WRAPPER_BODY.replace("__DUOBENCH_REAL_GH__", gh_bin)),
+    )
+    for name, body in wrappers:
         path = bin_dir / name
         path.write_text(body, encoding="utf-8")
         path.chmod(0o755)
@@ -1036,6 +1042,7 @@ def run_condition_trial(
                 "worktree_clean": commit_artifact.get("worktree_clean"),
                 "uncommitted_files": commit_artifact.get("uncommitted_files", []),
                 "branch": commit_artifact.get("branch", ""),
+                "commit": commit_artifact,
                 "notes": [
                     "Local-commit benchmark mode: implementer produces a local commit; "
                     "judge evaluates the commit, diff, and worktree state."
@@ -1363,7 +1370,11 @@ def _main() -> None:
     plan_jobs = len(_unique_planners(conditions)) * args.trials
     impl_jobs = len(conditions) * args.trials
     judge_jobs = impl_jobs * len(cfg.judges)
-    ui.log(f"phase plan: {plan_jobs} shared planner run(s) → PR: {impl_jobs} implementation run(s) → judge: {judge_jobs} judge run(s)")
+    submission_label = "local commit" if submission_mode == "local_commit" else "PR"
+    ui.log(
+        f"phase plan: {plan_jobs} shared planner run(s) → {submission_label}: "
+        f"{impl_jobs} implementation run(s) → judge: {judge_jobs} judge run(s)"
+    )
     ui.log(f"Pi sessions: {'saved with descriptive names' if args.pi_sessions and not args.dry_run else 'not saved'}")
     if not args.dry_run and not args.skip_model_check:
         # Resolve registry aliases (e.g. `kimi-k2.6`) to full Pi specs before
