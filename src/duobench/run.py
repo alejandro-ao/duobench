@@ -978,6 +978,10 @@ def run_condition_trial(
     else:
         branch = _safe_path_part(f"duobench/{run_label}/{cond.id}/trial-{trial}")
         worktree_dir = prepare_worktree(Path.cwd(), build_dir, branch=branch, submission_mode=submission_mode)
+        # The implementer writes its build into the worktree dir. Prefer the
+        # actual returned path so callers/tests that override `build_dir` still
+        # see the right location for capture-commit and verify.
+        build_dir = worktree_dir
         # The safety bin dir is .duobench-bin inside the worktree (only installed
         # in local_commit mode; in pr mode the directory does not exist).
         candidate_bin = worktree_dir / ".duobench-bin"
