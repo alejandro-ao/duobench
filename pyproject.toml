@@ -20,19 +20,15 @@ classifiers = [
 ]
 dependencies = [
     "pyyaml>=6.0",
-    "playwright>=1.49",
     "matplotlib>=3.9",
-    "pillow>=11.0",
-    "rich>=13.9",
+    "seaborn>=0.13",
+    "pandas>=2.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/alejandro-ao/agent-synergy-eval"
 Repository = "https://github.com/alejandro-ao/agent-synergy-eval"
 Issues = "https://github.com/alejandro-ao/agent-synergy-eval/issues"
-
-[project.scripts]
-duobench = "duobench.run:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -45,3 +41,6 @@ packages = ["src/duobench"]
 dev = [
     "pytest>=8.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

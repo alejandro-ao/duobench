@@ -1,76 +1,91 @@
 # Prompt for a cloud coding agent
 
 Use this prompt when asking a cloud agent/runner to execute this benchmark.
+The agent is the orchestrator: there is no monolithic CLI. It launches one Pi RPC
+instance per phase-unit via `scripts/run_phase.py` (each writes a `result.json`
+sentinel), gates each phase on completion, then aggregates and plots.
+
+The canonical orchestration contract is the **`duobench` skill** at
+`.claude/skills/duobench/SKILL.md` — when running inside Claude Code, follow it.
+For a non-Claude runner, the prompt below covers the same flow.
 
 ```text
-You are operating in a cloud machine. Your task is to run the duobench benchmark and return the generated artifacts, especially the HTML report.
+You are operating in a cloud machine. Your task is to run the duobench benchmark and return the artifacts (results.json and the plots under runs/<timestamp>/results/).
 
 Repository:
   git@github.com:alejandro-ao/agent-synergy-eval.git
 
 Goal:
-  Run exactly one real benchmark condition first: GPT 5.5 as planner and Kimi K2.6 as implementer (`gpt-x-kimi`), one trial. Do not run the full matrix unless explicitly asked later.
+  Run exactly one real condition first: GPT 5.5 as planner and Kimi K2.6 as implementer (condition id `gpt-5.5-x-kimi-k2.6`), one trial. Do not run the full matrix unless explicitly asked later.
 
 Hard requirement:
-  You MUST run the real benchmark inside tmux (or an equivalent persistent terminal multiplexer if tmux is unavailable). Do not run the real benchmark directly in a short-lived shell, because it can take a long time and may be interrupted. Use plain logs (`--no-live`) and tee output to a log file.
+  Run each real phase job inside tmux (or an equivalent persistent multiplexer); jobs can take a long time. Redirect each job's output to a log file. A job is finished when its result.json appears in its --out-dir.
 
 Important context:
-  - This project benchmarks planner × implementer LLM pairings through Pi RPC.
-  - The planner receives `prompts/architect.md` and produces `plan.md`.
-  - The implementer receives `prompts/implement.md` with `{plan}` replaced by the planner output and writes a small MiniDesk browser app into `build/`. **By default, `--local-commit` is on**: the implementer must create a single local commit and return its SHA. The harness installs safety wrappers (PATH-prepended `git`/`gh` rejecting `git push` and `gh pr create`) and removes the `upstream` remote, so the agent cannot push branches or open PRs against the upstream repository. Do not pass `--no-local-commit` unless you intentionally want external PRs.
-  - Judges score the build from source, screenshots, and smoke-test output. In local-commit mode the judge prompt asks the judge to inspect the commit, diff, and worktree state instead of a PR.
-  - The final review artifact is `runs/<timestamp>/report.html`.
-  - Raw transcripts/events are saved under each trial directory.
+  - duobench benchmarks planner × implementer LLM pairings through Pi RPC.
+  - The planner receives prompts/architect.md and produces plan.md.
+  - The implementer receives prompts/implement_local_commit.md (with {plan} substituted), works in an isolated git worktree, and creates exactly ONE local commit, returning its SHA. The harness installs PATH-prepended git/gh safety wrappers (rejecting `git push` and `gh pr create`) and removes the `upstream` remote, so the agent cannot push branches or open PRs. Submission mode `local_commit` is the default; only pass `--submission-mode pr` if you intentionally want external PRs.
+  - Judges receive prompts/judge_local_commit.md and inspect the commit, diff, and worktree state read-only, scoring 4 dimensions as strict JSON.
+  - Final artifacts are runs/<timestamp>/results.json and runs/<timestamp>/results/*.png.
 
-Setup steps:
-  1. Clone the repo.
-  2. Ensure `uv` is installed.
-  3. Run:
-       uv sync
-       uv run playwright install chromium
-  4. Ensure the `pi` binary is available on PATH and can run `pi --mode rpc`.
-  5. Ensure Pi has the required providers/models configured:
-       - provider `openai-codex`, model `gpt-5.5`
-       - provider `kimi-coding`, model `kimi-for-coding`
-     If those provider/model IDs are wrong for the environment, update `config/models.yaml` accordingly and explain the change.
+Setup:
+  1. Clone the repo; ensure `uv`, `git`, authenticated `gh`, and `pi` (can run `pi --mode rpc`) are available.
+  2. uv sync
+  3. Ensure Pi has the providers/models: provider `openai-codex` model `gpt-5.5`, provider `kimi-coding` model `kimi-for-coding`. If different, update config/models.yaml and explain.
 
-Validation:
-  First run a dry run:
-    uv run duobench run --dry-run --conditions gpt-x-kimi --trials 1 --no-live
+Run (TS = a UTC timestamp like 2026-06-08T10-30-00; ISSUE = the issue URL):
+  COND=gpt-5.5-x-kimi-k2.6
 
-Real run:
-  Run the real benchmark inside tmux. Use this exact pattern, replacing `<repo>` with the repository path:
+  # 1) plan job for the planner (gpt-5.5)
+  tmux new-session -d -s duobench_plan \
+    "cd <repo> && PYTHONUNBUFFERED=1 uv run python scripts/run_phase.py --phase plan \
+       --run-dir runs/$TS --out-dir runs/$TS/shared-plans/gpt-5.5/trial-0 \
+       --issue $ISSUE --planner gpt-5.5 --trial 0 \
+       > runs/$TS/shared-plans/gpt-5.5/trial-0/job.log 2>&1"
+  # wait until runs/$TS/shared-plans/gpt-5.5/trial-0/result.json exists
 
-  tmux new-session -d -s duobench 'cd <repo> && PYTHONUNBUFFERED=1 uv run duobench run --conditions gpt-x-kimi --trials 1 --no-live --plan-timeout 600 --impl-timeout 1800 --judge-timeout 300 2>&1 | tee /tmp/duobench.log'
+  # 2) implement job (reads the plan above)
+  tmux new-session -d -s duobench_impl \
+    "cd <repo> && PYTHONUNBUFFERED=1 uv run python scripts/run_phase.py --phase implement \
+       --run-dir runs/$TS --out-dir runs/$TS/conditions/$COND/trial-0 --condition $COND \
+       --issue $ISSUE --planner gpt-5.5 --implementer kimi-k2.6 \
+       --plan-path runs/$TS/shared-plans/gpt-5.5/trial-0/plan.md --trial 0 \
+       > runs/$TS/conditions/$COND/trial-0/job.log 2>&1"
+  # wait for runs/$TS/conditions/$COND/trial-0/result.json; read its artifact.commit_sha as SHA
 
-  Monitor it with:
-    tmux attach -t duobench
-    tail -f /tmp/duobench.log
+  # 3) judge jobs (one per judge: kimi-k2.6, gpt-5.5)
+  for J in kimi-k2.6 gpt-5.5; do
+    tmux new-session -d -s duobench_judge_$J \
+      "cd <repo> && PYTHONUNBUFFERED=1 uv run python scripts/run_phase.py --phase judge \
+         --run-dir runs/$TS --out-dir runs/$TS/conditions/$COND/trial-0 --condition $COND \
+         --issue $ISSUE --judge-key $J \
+         --build-dir runs/$TS/conditions/$COND/trial-0/worktree --commit-sha <SHA> --trial 0 \
+         > runs/$TS/conditions/$COND/trial-0/job-judge-$J.log 2>&1"
+  done
+  # wait for runs/$TS/conditions/$COND/trial-0/results/judge-*.json
 
-  Detach safely from tmux with Ctrl-b, then d. Do NOT press Ctrl-d unless you intend to close the shell/session.
+  # 4) aggregate + plot (pure, fast — no tmux needed)
+  uv run python scripts/aggregate.py runs/$TS
+  cp scripts/plots_example.py runs/$TS/plots.py && uv run python runs/$TS/plots.py runs/$TS
 
-  If tmux is truly unavailable, use an equivalent persistent background/session mechanism and explain what you used.
-
-Do not accidentally run all conditions. Use `--conditions gpt-x-kimi`.
+Monitor a job: tmux attach -t <session> (detach with Ctrl-b then d), or tail -f the job.log.
 
 When complete, report:
-  - run directory path, e.g. `runs/2026-...`
-  - `report.html` path
-  - leaderboard summary printed by the CLI
-  - whether `verify.json` says `boots_ok: true`
-  - total configured cost from `results.json`
+  - run directory path, e.g. runs/2026-...
+  - the leaderboard printed by scripts/aggregate.py
+  - each job's result.json status (complete/timeout/stalled/error)
+  - total cost from results.json
   - any failures/errors/timeouts
 
 Artifacts to preserve/return:
-  - `runs/<timestamp>/report.html`
-  - `runs/<timestamp>/results.json`
-  - `runs/<timestamp>/results/`
-  - the whole `runs/<timestamp>/conditions/gpt-x-kimi/trial-0/` directory if possible
+  - runs/<timestamp>/results.json
+  - runs/<timestamp>/results/ (PNGs + CSVs)
+  - runs/<timestamp>/conditions/$COND/trial-0/ if possible
 
-Do not commit generated run artifacts unless explicitly asked. Canonical outputs stay under `runs/<timestamp>/`; do not push generated artifacts unless asked.
+Do not commit generated run artifacts unless explicitly asked.
 
 If anything fails:
-  - rerun with `--debug` only if necessary
-  - inspect `planner-events.jsonl`, `implementer-events.jsonl`, and transcript JSON files if they exist
-  - explain exactly which phase failed: config, planner, implementer, verify, judge, charts, or report generation
+  - read the failing job's result.json (status + error + notes) and its job.log tail
+  - inspect planner-events.jsonl / implementer-events.jsonl / transcript JSON if present
+  - state exactly which phase/unit failed: plan, implement, judge, or aggregate
 ```

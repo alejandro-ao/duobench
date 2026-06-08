@@ -30,13 +30,12 @@ from pathlib import Path
 import pytest
 
 from duobench.config import Condition, Config, Model, Pricing
-from duobench.run import (
-    SharedPlan,
+from duobench.engine import (
     _capture_commit_artifacts,
     _install_local_commit_safety,
     _remove_upstream_remote,
+    implement_one,
     prepare_worktree,
-    run_condition_trial,
 )
 
 
@@ -101,7 +100,7 @@ def test_local_commit_judge_prompt_evaluates_commit_not_pr():
 def test_prepare_worktree_installs_safety_wrappers_in_local_commit_mode(tmp_path, monkeypatch):
     """In local-commit mode, prepare_worktree must install a worktree-local bin/
     with PATH-prepended git/gh wrappers that block push and PR creation."""
-    import duobench.run as run_mod
+    import duobench.engine as run_mod
 
     repo_dir = tmp_path / "repo"
     worktree_dir = tmp_path / "worktree"
@@ -151,7 +150,7 @@ def test_prepare_worktree_installs_safety_wrappers_in_local_commit_mode(tmp_path
 def test_prepare_worktree_does_not_install_wrappers_in_pr_mode(tmp_path, monkeypatch):
     """In PR mode (legacy), prepare_worktree should not install the safety
     wrappers or remove the upstream remote — the agent is supposed to push."""
-    import duobench.run as run_mod
+    import duobench.engine as run_mod
 
     repo_dir = tmp_path / "repo"
     worktree_dir = tmp_path / "worktree"
@@ -196,7 +195,7 @@ def test_install_local_commit_safety_creates_executable_wrappers(tmp_path):
 
 
 def test_remove_upstream_remote_handles_absent_remote(tmp_path, monkeypatch):
-    import duobench.run as run_mod
+    import duobench.engine as run_mod
 
     captured: list[list[str]] = []
 
@@ -386,30 +385,29 @@ def test_capture_commit_artifacts_handles_missing_sha(tmp_path):
     assert "missing" in artifact["notes"][0].lower()
 
 
-# --- CLI flag --------------------------------------------------------------
+# --- default prompt selection ----------------------------------------------
 
 
-def test_default_cli_flag_is_local_commit(monkeypatch):
-    """The --local-commit flag is on by default (see #11)."""
-    from duobench.run import _main  # noqa: F401
-    import argparse
+def test_local_commit_is_the_default_prompt_set():
+    """load_prompts defaults select the local-commit implementer/judge prompts."""
+    from duobench.engine import load_prompts
 
-    # Parse the same argparse that the CLI uses, with no override, and check
-    # that --local-commit defaults to True.
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--local-commit", action=argparse.BooleanOptionalAction, default=True)
-    args = parser.parse_args([])
-    assert args.local_commit is True
+    prompts = load_prompts("local_commit", "https://example.com/issues/1")
+    assert "do not push" in prompts["implement"].lower()
+    assert "{commit_sha}" in prompts["judge"]
+    assert "{pr_id}" not in prompts["judge"]
 
-
-# --- end-to-end run_condition_trial wiring ---------------------------------
+    pr_prompts = load_prompts("pr", "https://example.com/issues/1")
+    assert "{pr_id}" in pr_prompts["judge"]
 
 
-def test_run_condition_trial_local_commit_records_commit_artifact(tmp_path, monkeypatch):
-    """A run_condition_trial call in local_commit mode should record a
-    commit.json, expose a commit_sha in trial.json / meta, and write the
-    local-commit mode markers in the artifacts block."""
-    import duobench.run as run_mod
+# --- end-to-end implement_one wiring ---------------------------------------
+
+
+def test_implement_one_local_commit_records_commit_artifact(tmp_path, monkeypatch):
+    """implement_one in local_commit mode records commit.json, a commit_sha in
+    trial.json, and the local-commit markers in the artifacts block."""
+    import duobench.engine as run_mod
 
     cfg = _cfg()
     prompts = {
@@ -418,13 +416,13 @@ def test_run_condition_trial_local_commit_records_commit_artifact(tmp_path, monk
         "implement": "implement",
         "judge": "judge",
     }
-    shared_plan = SharedPlan(
-        planner="kimi",
-        trial=0,
-        plan_text="plan",
-        cost_usd=0.0,
-        cost_source="configured",
-        source_dir=tmp_path / "plans/kimi/trial-0",
+
+    # A plan dir with plan.md + shared-plan.json (the implement job's input).
+    plan_dir = tmp_path / "plans" / "kimi" / "trial-0"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "plan.md").write_text("plan")
+    (plan_dir / "shared-plan.json").write_text(
+        '{"planner": "kimi", "trial": 0, "cost_usd": 0.0, "cost_source": "configured", "duration_s": 1.0}'
     )
 
     # Use a tiny git repo as the "worktree" so the capture-commit path works.
@@ -441,21 +439,16 @@ def test_run_condition_trial_local_commit_records_commit_artifact(tmp_path, monk
     ).stdout.strip()
 
     # Skip real worktree creation; pretend the trial ran in our fake repo.
-    monkeypatch.setattr(run_mod, "prepare_worktree", lambda repo_dir, build_dir, *, branch, submission_mode: repo)
-    # Avoid Playwright — the fake repo has no index.html.
-    monkeypatch.setattr(run_mod, "verify_build", lambda build_dir, shots_dir: _FakeVerifyResult())
+    monkeypatch.setattr(
+        run_mod, "prepare_worktree",
+        lambda repo_dir, build_dir, *, branch, submission_mode: repo,
+    )
 
     def fake_run_impl_phase(*args, **kwargs):
         from duobench.cost import PhaseCost
         from duobench.impl_phase import ImplResult
         return ImplResult(
-            cost=PhaseCost(
-                input_tokens=1,
-                output_tokens=1,
-                cache_read_tokens=0,
-                cache_write_tokens=0,
-                usd=0.01,
-            ),
+            cost=PhaseCost(input_tokens=1, output_tokens=1, cache_read_tokens=0, cache_write_tokens=0, usd=0.01),
             turns=1,
             status="complete",
             final_text=sha,
@@ -467,48 +460,21 @@ def test_run_condition_trial_local_commit_records_commit_artifact(tmp_path, monk
 
     monkeypatch.setattr(run_mod, "run_impl_phase", fake_run_impl_phase)
 
-    trial_dir = tmp_path / "trial"
-    trial_dir.mkdir()
-    rec, meta = run_condition_trial(
-        cfg, cfg.conditions[0], 0, trial_dir, prompts, shared_plan,
-        dry_run=False,
-        plan_timeout=600,
-        impl_timeout=1800,
-        judge_timeout=300,
-        submission_mode="local_commit",
-        run_label="test",
+    out_dir = tmp_path / "conditions" / "kimi-solo" / "trial-0"
+    out_dir.mkdir(parents=True)
+    outcome = implement_one(
+        cfg, prompts,
+        planner_key="kimi", implementer_key="kimi", condition_id="kimi-solo",
+        plan_path=plan_dir / "plan.md", out_dir=out_dir, trial=0,
+        impl_timeout=1800, submission_mode="local_commit", run_label="test",
     )
-    assert rec.impl_status == "complete"
-    assert meta["submission_mode"] == "local_commit"
-    assert meta["commit_sha"] == sha
-    assert (trial_dir / "commit.json").is_file()
-    payload = __import__("json").loads((trial_dir / "trial.json").read_text())
+    assert outcome.status == "complete"
+    assert outcome.artifact["commit_sha"] == sha
+    assert (out_dir / "commit.json").is_file()
+    payload = __import__("json").loads((out_dir / "trial.json").read_text())
     assert payload["artifacts"]["submission_mode"] == "local_commit"
     assert payload["artifacts"]["commit"]["sha"] == sha
-    verify = __import__("json").loads((trial_dir / "verify.json").read_text())
+    assert payload["meta"]["commit_sha"] == sha
+    verify = __import__("json").loads((out_dir / "verify.json").read_text())
     assert verify["commit"]["commit_sha"] == sha
     assert "x.txt" in verify["commit"]["diff"]
-
-
-# --- shared helper ---------------------------------------------------------
-
-
-class _FakeVerifyResult:
-    boots_ok = True
-    screenshots = []
-
-    def to_dict(self):
-        return {
-            "boots_ok": True,
-            "desktop_rendered": True,
-            "taskbar_rendered": True,
-            "fatal_console_errors": [],
-            "apps_attempted": 3,
-            "apps_launched": 3,
-            "app_results": [],
-            "screenshots": [],
-            "notes": [],
-        }
-
-    def summary_for_judge(self):
-        return "{}"

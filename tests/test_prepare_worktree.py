@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from duobench.config import ConfigError
-from duobench.run import _origin_repo_slug, prepare_worktree
+from duobench.engine import _origin_repo_slug, prepare_worktree
 
 
 @pytest.mark.parametrize(
@@ -24,7 +24,7 @@ def test_origin_repo_slug_rejects_unknown_remote():
 
 
 def test_prepare_worktree_sets_origin_default_and_push_guard(tmp_path, monkeypatch):
-    import duobench.run as run_mod
+    import duobench.engine as run_mod
 
     repo_dir = tmp_path / "repo"
     worktree_dir = tmp_path / "worktree"

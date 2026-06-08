@@ -1,6 +1,6 @@
 # Optional named planner×implementer presets. `planner` and `implementer` are keys into
 # models.yaml. For the common full cross-product benchmark, prefer the CLI matrix:
-#   duobench run --models kimi-k2.6,gpt-5.5,claude-opus-4.8
+#   (the duobench skill expands a model matrix directly)
 # `id` is used for output filenames/charts when selecting these presets.
 conditions:
   - { id: kimi-solo,   planner: kimi-k2.6,       implementer: kimi-k2.6 }

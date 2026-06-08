@@ -1,5 +1,5 @@
 from duobench.config import load_config
-from duobench.run import _load_prompt
+from duobench.engine import _load_prompt
 
 
 def test_load_config_falls_back_to_packaged_defaults(tmp_path, monkeypatch):

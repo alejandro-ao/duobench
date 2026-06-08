@@ -9,28 +9,22 @@
     ╚═════╝  ╚═════╝  ╚═════╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝╚═╝  ╚═╝
 ```
 
-<h3>Benchmark planner × implementer AI coding-agent duos on real GitHub issue → pull request workflows</h3>
+<h3>Benchmark planner × implementer AI coding-agent duos on real GitHub issues — orchestrated by an agent, charted as quality-per-dollar</h3>
 
 <p>
   <a href="https://github.com/alejandro-ao/agent-synergy-eval/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT">
   </a>
-  <a href="https://github.com/alejandro-ao/agent-synergy-eval/actions">
-    <img src="https://img.shields.io/badge/tests-passing-brightgreen" alt="Tests">
-  </a>
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/pi-integrated-9cf" alt="Pi">
-  <a href="https://github.com/alejandro-ao/agent-synergy-eval/stargazers">
-    <img src="https://img.shields.io/github/stars/alejandro-ao/agent-synergy-eval?style=social" alt="GitHub Stars">
-  </a>
 </p>
 
 <p>
   <a href="#quick-start">Quick Start</a> •
   <a href="#installation">Install</a> •
-  <a href="#usage">Usage</a> •
-  <a href="#output">Output</a> •
-  <a href="#design">Design</a>
+  <a href="#how-it-works">How It Works</a> •
+  <a href="#using-the-scripts-directly">Scripts</a> •
+  <a href="#output">Output</a>
 </p>
 
 </div>
@@ -39,263 +33,206 @@
 
 ## Overview
 
-**duobench** runs every planner/implementer pairing you choose through [Pi](https://pi.dev) RPC to measure which model duos produce the best **quality-per-dollar** for realistic software engineering work.
+**duobench** measures which **planner LLM × implementer LLM** duo produces the
+best **quality-per-dollar** on a real GitHub issue, scored by a panel of judge
+LLMs over [Pi](https://pi.dev) RPC.
+
+There is **no monolithic CLI**. An **agent orchestrates** the benchmark: it
+launches thin per-phase jobs (one Pi RPC instance each) across `tmux` sessions,
+gates each phase on completion, aggregates the results, and writes its own
+seaborn plots. You drive it conversationally through the **`duobench` skill** in
+Claude Code, or call the scripts yourself.
 
 ```
-┌─────────────┐     ┌─────────────────┐     ┌─────────────┐
-│   GitHub    │────▶│     Planner     │────▶│ Implementer │────▶ local commit
-│    Issue    │     │  (plan + handoff)│     │  (code only) │        │
-└─────────────┘     └─────────────────┘     └─────────────┘        │
-                                                                     │
+┌─────────────┐     ┌──────────────────┐     ┌──────────────┐
+│   GitHub    │────▶│     Planner      │────▶│ Implementer  │────▶ local commit
+│    Issue    │     │ (plan + handoff) │     │ (code only)  │        │
+└─────────────┘     └──────────────────┘     └──────────────┘        │
                               ┌──────────────────────────────────────┘
                               ▼
                        ┌─────────────┐
-                       │    Judge    │  ◄── scores on 4 dimensions + cost
-                       │  (evaluate) │
+                       │    Judges   │  ◄── score on 4 dimensions; cost from tokens
                        └─────────────┘
 ```
 
-### What It Does
+### What it does
 
-By default (`--local-commit`, on), duobench is **safe to run against public upstream issues**:
+duobench is **safe to run against public upstream issues by default** — the
+implementer only ever makes a local commit:
 
-1. **Planner** inspects a GitHub issue and the local repo, then writes a handoff plan.
-2. **Implementer** receives the issue + plan in an isolated git worktree, makes code changes, runs checks, and creates exactly **one local commit**. The harness installs PATH-prepended `git`/`gh` safety wrappers and removes the `upstream` remote so the agent cannot push branches or open PRs.
-3. **Judge** models inspect the commit, diff, and worktree state with `git`/`gh` (read-only) and score the result.
-4. **Harness** writes transcripts, costs, charts, CSVs, and an HTML report.
+1. **Planner** inspects the issue + repo and writes a handoff plan (read-only).
+2. **Implementer** works in an isolated git worktree and creates exactly **one
+   local commit**. The harness installs PATH-prepended `git`/`gh` safety wrappers
+   and removes the `upstream` remote, so it cannot push branches or open PRs.
+3. **Judges** inspect the commit, diff, and worktree (read-only) and score
+   `task_completion`, `correctness`, `code_quality`, `verification` (1–10).
+4. **You aggregate + plot**: `results.json` plus seaborn charts of
+   quality-per-dollar.
 
-> ℹ️ **No external side effects by default.** The implementer never pushes, never opens a PR, and never interacts with the upstream repository. Every artifact stays in your local worktree. To opt back into the legacy PR-creating flow (unsafe against public upstream issues), pass `--no-local-commit`. See [Safety Tips](#safety-tips) below.
+> ℹ️ **No external side effects by default.** Every artifact stays in your local
+> worktree under `runs/<timestamp>/`. The legacy PR-creating flow is opt-in via
+> `--submission-mode pr` and is unsafe against public upstream issues.
 
 ---
 
 ## Requirements
 
-- Python 3.11+
-- [`uv`](https://docs.astral.sh/uv/)
-- `git`
-- GitHub CLI: [`gh`](https://cli.github.com/) (authenticated)
+- Python 3.11+ and [`uv`](https://docs.astral.sh/uv/)
+- `git`, and the authenticated GitHub CLI [`gh`](https://cli.github.com/)
 - `pi` on PATH, with configured model providers
-
-Check basics:
+- `tmux` (for running long phase jobs in parallel)
 
 ```bash
-gh auth status
-pi --version
-git status
+gh auth status && pi --version && git status && tmux -V
 ```
 
 ---
 
 ## Installation
 
-**From this checkout:**
-
 ```bash
 uv sync
-uv run playwright install chromium
 ```
 
-**As a uv tool from PyPI:**
-
-```bash
-uv tool install duobench
-uvx playwright install chromium
-```
-
-**Or directly from GitHub:**
-
-```bash
-uv tool install git+https://github.com/alejandro-ao/agent-synergy-eval.git
-uvx playwright install chromium
-```
+That's it — no browser/Playwright dependency. The phase scripts run via
+`uv run python scripts/...`.
 
 ---
 
 ## Quick Start
 
-### 1. Validate without spending tokens
+The intended way to run duobench is to **ask the agent**. In Claude Code, from
+this repo, the `duobench` skill (`.claude/skills/duobench/SKILL.md`) triggers on
+phrases like:
+
+- *"benchmark opus and kimi on duobench and produce plots about the results"*
+- *"add gpt planner and kimi implementer to the eval and produce the plots too"*
+
+The agent will: confirm the GitHub issue + the model matrix + the estimated job
+count, create a `runs/<timestamp>/` dir, launch the plan → implement → judge
+phase jobs in `tmux` (gating each phase on completion), aggregate, and write +
+run a seaborn plotting script, then show you the charts.
+
+You can watch any job live:
 
 ```bash
-uv run duobench --dry-run --models kimi-k2.6,gpt-5.5 --trials 1 --no-live
+tmux ls                                  # list duobench jobs
+tmux attach -t <job>                     # watch one (detach with Ctrl-b then d)
+tail -f runs/<ts>/conditions/<cond>/trial-0/job.log
 ```
-
-Open the generated report:
-
-```bash
-open runs/<timestamp>/report.html
-```
-
-### 2. Run one real condition first
-
-```bash
-uv run duobench \
-  --issue https://github.com/org/repo/issues/123 \
-  --conditions gpt-x-kimi \
-  --trials 1 \
-  --no-live
-```
-
-### 3. Run a full model matrix
-
-```bash
-uv run duobench \
-  --issue https://github.com/org/repo/issues/123 \
-  --models openai-codex/gpt-5.5:high,kimi-coding/kimi-for-coding:high,anthropic/claude-opus-4.8 \
-  --trials 1
-```
-
-With three models and one trial, this runs **3 planner sessions**, **9 implementer sessions**, and a **judge panel over every PR**.
 
 ---
 
-## Usage
+## How It Works
 
-### Common Commands
+A **condition** is one planner×implementer pairing, identified by
+`<planner>-x-<implementer>` (or `<planner>-solo` when they're equal). Each phase
+is one Pi RPC instance run by `scripts/run_phase.py`, which writes a
+`result.json` sentinel as its last action — the agent polls for that file to know
+a job is done.
+
+| Phase | Jobs | Reads | Writes |
+|-------|------|-------|--------|
+| **plan** | one per unique planner × trial | the issue + repo | `shared-plans/<planner>/trial-<n>/plan.md` |
+| **implement** | one per condition × trial | the planner's `plan.md` | `conditions/<cond>/trial-<n>/{worktree/, commit.json, verify.json, trial.json}` |
+| **judge** | one per condition × judge × trial | the commit + diff | `conditions/<cond>/trial-<n>/judge-transcripts/<judge>.json` |
+| **aggregate** | one (pure, no model calls) | every `trial.json` | `results.json` |
+| **plot** | one (pure) | `results.json` + `trial.json` | `results/*.png` + `*.csv` |
+
+Adding a condition to an existing run reuses the planner's `plan.md` if present,
+runs only the new condition's implement + judge jobs, then re-aggregates the
+whole run dir (old + new merge automatically).
+
+---
+
+## Using the Scripts Directly
+
+You don't need the agent — the scripts are plain `uv run` commands.
 
 ```bash
-# Full planner × implementer matrix from Pi model specs
-uv run duobench --issue https://github.com/org/repo/issues/123 --models openai-codex/gpt-5.5:high,kimi-coding/kimi-for-coding:high --trials 1
+TS=$(date -u +%Y-%m-%dT%H-%M-%S); ISSUE=https://github.com/org/repo/issues/123
 
-# Rectangular matrix: selected planners crossed with selected implementers
-uv run duobench --issue https://github.com/org/repo/issues/123 \
-  --planners openai-codex/gpt-5.5:high,kimi-coding/kimi-for-coding:high \
-  --implementers kimi-coding/kimi-for-coding:high --trials 1
+# 1) plan (one per unique planner)
+uv run python scripts/run_phase.py --phase plan \
+  --run-dir runs/$TS --out-dir runs/$TS/shared-plans/kimi-k2.6/trial-0 \
+  --issue $ISSUE --planner kimi-k2.6 --trial 0
 
-# Explicit conditions from config/conditions.yaml
-uv run duobench --issue https://github.com/org/repo/issues/123 --conditions gpt-x-kimi --trials 1
+# 2) implement (one per condition) — points at that planner's plan.md
+uv run python scripts/run_phase.py --phase implement \
+  --run-dir runs/$TS --out-dir runs/$TS/conditions/kimi-k2.6-solo/trial-0 \
+  --issue $ISSUE --condition kimi-k2.6-solo \
+  --planner kimi-k2.6 --implementer kimi-k2.6 \
+  --plan-path runs/$TS/shared-plans/kimi-k2.6/trial-0/plan.md --trial 0
 
-# Serial execution (useful to avoid PR/branch chaos while testing)
-uv run duobench --issue https://github.com/org/repo/issues/123 --models kimi-k2.6,gpt-5.5 --parallel 1 --trials 1
+# 3) judge (one per condition × judge) — commit SHA from the implement result.json
+uv run python scripts/run_phase.py --phase judge \
+  --run-dir runs/$TS --out-dir runs/$TS/conditions/kimi-k2.6-solo/trial-0 \
+  --issue $ISSUE --condition kimi-k2.6-solo --judge-key gpt-5.5 \
+  --build-dir runs/$TS/conditions/kimi-k2.6-solo/trial-0/worktree --commit-sha <SHA> --trial 0
 
-# Regenerate an HTML report from an existing run
-uv run duobench report runs/<timestamp>
+# 4) aggregate → results.json  +  5) plot → results/*.png
+uv run python scripts/aggregate.py runs/$TS
+cp scripts/plots_example.py runs/$TS/plots.py && uv run python runs/$TS/plots.py runs/$TS
 ```
 
-`duobench ...` is shorthand for `duobench run ...`.
+Long phase jobs are meant to run detached in `tmux`; see the `duobench` skill for
+the launch/gate/cap recipe the agent uses.
 
-### CLI Flags
+### `run_phase.py` flags
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--issue URL` | required for real runs | GitHub issue URL/reference. Agents fetch it themselves with `gh`. |
-| `--models a,b,c` | off | Generate full planner × implementer matrix from Pi model specs. |
-| `--planners a,b` | off | Planner Pi model specs for rectangular matrix. Use with `--implementers`. |
-| `--implementers a,b` | off | Implementer Pi model specs for rectangular matrix. Use with `--planners`. |
-| `--judges a,b` | `--models` or config judges | Judge Pi model specs. |
-| `--conditions a,b` | all config conditions | Run named condition IDs from `conditions.yaml`. |
-| `--trials N` | `1` | Trials per condition. |
-| `--parallel auto\|all\|N` | `auto` | Planner/implementation concurrency. Use `1` for serial. |
-| `--dry-run` | off | Stub model calls and generate synthetic outputs. |
-| `--out DIR` | `runs` | Output directory root. |
-| `--models-config PATH` | `config/models.yaml` | Optional legacy model registry / default judges. |
-| `--conditions-config PATH` | `config/conditions.yaml` | Condition preset path. |
-| `--costs-config PATH` | `costs.yaml` | Optional fallback pricing when Pi does not report cost. |
-| `--plan-timeout SEC` | `600` | Planner wall-clock timeout. |
-| `--impl-timeout SEC` | `1800` | Implementer wall-clock timeout. |
-| `--judge-timeout SEC` | `300` | Per-judge timeout. |
-| `--pi-sessions` / `--no-pi-sessions` | on | Save Pi sessions in Pi's normal session store. |
-| `--local-commit` / `--no-local-commit` | on | `local-commit` (default): implementer produces a single local commit; no pushes, no PRs, no upstream interaction. `--no-local-commit` opts back into the legacy PR-creating flow. |
-| `--live` / `--no-live` | auto (TTY) | Rich live dashboard. |
-| `--skip-model-check` | off | Skip the fail-fast Pi model/auth validation pass. |
-| `--debug` | off | Show full Python tracebacks on errors. |
+| Flag | Phases | Description |
+|------|--------|-------------|
+| `--phase plan\|implement\|judge` | all | which phase to run |
+| `--run-dir` / `--out-dir` | all | run root, and this job's output dir (where `result.json` lands) |
+| `--issue URL` | all | GitHub issue (required) |
+| `--trial N` | all | trial index |
+| `--timeout SEC` | all | wall-clock (defaults: plan 600, implement 1800, judge 300) |
+| `--submission-mode local_commit\|pr` | implement | default `local_commit` (safe); `pr` is the legacy PR-creating flow |
+| `--planner SPEC` | plan, implement | planner model spec/key |
+| `--implementer SPEC` / `--plan-path` | implement | implementer spec; path to the planner's `plan.md` |
+| `--judge-key SPEC` / `--build-dir` / `--commit-sha` | judge | judge spec; the trial's worktree; the commit to score |
+| `--models-config / --conditions-config / --costs-config` | all | config paths |
+| `--no-pi-sessions` | all | don't persist Pi sessions |
 
 ---
 
 ## Models & Costs
 
-### Model Specs
+`--planner`, `--implementer`, and `--judge-key` accept either a **registry key**
+from `config/models.yaml` (`kimi-k2.6`, `gpt-5.5`) or a raw **Pi spec**
+(`kimi-coding/kimi-for-coding`, `openai-codex/gpt-5.5`), optionally with a
+`:thinking` suffix (`off|minimal|low|medium|high|xhigh`).
 
-`--models`, `--planners`, `--implementers`, `--judges`, and the `planner`/`implementer` fields in `conditions.yaml` all accept the same model spec format. There are two equivalent ways to write a spec:
-
-- **Registry key** (a short alias defined in `config/models.yaml`): `kimi-k2.6`, `gpt-5.5`
-- **Pi spec** (what you would pass to `pi --model`): `kimi-coding/kimi-for-coding`, `openai-codex/gpt-5.5`
-
-You can append a `:thinking` suffix to either form to set the thinking level for that run:
-
-```bash
---models kimi-k2.6:high,openai-codex/gpt-5.5:high
-```
-
-Valid levels are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`. A registry key with a `:thinking` suffix overrides the registry's `thinking` field for that run. Unknown keys are marked with `*` in dry-run output — they're passed straight to Pi but skip the registry's defaults for `provider`, `thinking`, and `pricing`.
-
-Before a real benchmark starts, duobench validates each unique model by launching Pi with that model and asking it to reply `OK`. Use `--skip-model-check` only if you intentionally want to bypass that fail-fast auth/model check.
-
-### Cost Accounting
-
-Duobench prefers Pi/provider-reported cost when available. If Pi does not report cost, duobench falls back to the model's `pricing` block in `config/models.yaml` or, failing that, rates from `costs.yaml`. Rates are dollars per million tokens:
+Cost prefers Pi/provider-reported cost; otherwise it falls back to the model's
+`pricing` block in `config/models.yaml`, then `costs.yaml` (rates are $/MTok). If
+none is available, cost is recorded as `0` with source `unknown` and
+quality-per-dollar is meaningless — the aggregate leaderboard warns about this.
 
 ```yaml
-# config/models.yaml — pricing for a registry key
+# config/models.yaml
 models:
   kimi-k2.6:
     provider: kimi-coding
     model_id: kimi-for-coding
+    thinking: high
     pricing: { input: 0.95, output: 4.00 }
+judges: [kimi-k2.6, gpt-5.5]
 ```
 
-```yaml
-# costs.yaml — pricing for a direct Pi spec, keyed by the exact spec string
-models:
-  kimi-coding/kimi-for-coding:
-    input: 0.95
-    output: 4.00
-  kimi-coding/kimi-for-coding:high:
-    input: 0.95
-    output: 4.00
-    cache_read: 0.15
-    cache_write: 0.95
-```
-
-If neither Pi nor any of the above provides cost information, duobench records cost as `0` with source `unknown`. The dry-run leaderboard prints a warning when any condition has source `unknown`, because `cost_efficiency` is meaningless without pricing.
-
-### Optional Config Files
-
-`config/conditions.yaml` is useful for named manual pairings:
-
-```yaml
-conditions:
-  - id: gpt-x-kimi
-    planner: openai-codex/gpt-5.5:high
-    implementer: kimi-coding/kimi-for-coding:high
-```
-
-`config/models.yaml` remains supported mainly for packaged defaults, legacy condition aliases, and default judges. For most new experiments, prefer direct Pi model specs in the CLI plus optional `costs.yaml`.
+`config/conditions.yaml` holds optional named pairings; the agent usually expands
+a model matrix directly instead.
 
 ---
 
-## What Agents Are Asked To Do
+## What agents are asked to do
 
-### Planner
-
-- Inspect the issue using `gh`
-- Inspect the local repository
-- Produce a concise implementation plan
-- **Avoid** modifying files, branches, commits, pushes, or PRs
-
-### Implementer (default: `--local-commit`)
-
-- Inspect the issue with `gh` (read-only)
-- Make code changes and run appropriate checks in the worktree
-- Create exactly one local commit
-- **Do not push, do not open a PR, do not interact with the `upstream` remote**
-- Return only the commit SHA (full 40-char or short 7+)
-
-The harness enforces the safety contract in three layers: (1) the prompt forbids the actions, (2) PATH-prepended `git`/`gh` wrappers reject `git push` and `gh pr create|edit|merge|...`, and (3) the `upstream` remote is removed from the worktree.
-
-To use the legacy PR-creating flow (unsafe against public upstream issues), pass `--no-local-commit`. In PR mode the implementer creates a branch, pushes to `origin`, opens a PR, and returns the PR id.
-
-### Judge
-
-Each judge receives the issue URL, the implementer commit SHA (or PR id in PR mode), the planner handoff, and harness metadata. It can inspect the commit/diff/worktree (or PR) with `git` and `gh` (read-only), but must not mutate anything.
-
-| Dimension | Meaning |
-|-----------|---------|
-| `task_completion` | Does the commit/PR address the issue and avoid unrelated work? |
-| `correctness` | Is the behavior likely correct and robust? |
-| `code_quality` | Are changes maintainable, idiomatic, and appropriately scoped? |
-| `verification` | Were meaningful tests/checks included or run? |
-
-`cost_efficiency` is computed by the harness as quality divided by cost.
+- **Planner** — inspect the issue (`gh`) and repo; produce a plan; never modify files.
+- **Implementer** — make changes in the worktree, run checks, create **one local
+  commit**, return its SHA. Never push, never open a PR, never touch `upstream`.
+  Enforced three ways: the prompt, PATH-prepended `git`/`gh` wrappers (reject
+  `git push` / `gh pr create|edit|merge|...`), and removal of the `upstream` remote.
+- **Judge** — inspect the commit/diff/worktree read-only and emit strict JSON
+  scores. `cost_efficiency` = quality ÷ cost, computed by `aggregate.py` (not judged).
 
 ---
 
@@ -304,81 +241,48 @@ Each judge receives the issue URL, the implementer commit SHA (or PR id in PR mo
 Each run writes to `runs/<timestamp>/`:
 
 ```text
-report.html
-results.json
-results/
-  leaderboard.png / leaderboard.csv
-  dimension-radar.png / dimensions.csv
-  cost-vs-quality.png / cost-vs-quality.csv
-  self-bias-matrix.png / self-bias.csv
+run_state.json                       # orchestration state (agent-owned; enables resume)
+results.json                         # aggregated leaderboard + self-bias
+results/                             # agent-written plots
+  leaderboard.png / .csv
+  cost-vs-quality.png / .csv
+  dimensions.png / .csv
+  self-bias.png / .csv
+  cost-breakdown.png / .csv
+plots.py                             # the run's plotting script (copied + adapted)
 shared-plans/<planner>/trial-<n>/
-  plan.md
-  shared-plan.json
-  planner-transcript.json
-  planner-events.jsonl
-conditions/<condition-id>/trial-<n>/
-  plan.md
-  worktree/
-  verify.json
-  commit.json            # local-commit mode: commit SHA, diff, worktree cleanliness
-  trial.json
+  plan.md  shared-plan.json  planner-transcript.json  result.json
+conditions/<cond-id>/trial-<n>/
+  worktree/                          # isolated git worktree (+ .duobench-bin safety shims)
+  plan.md  commit.json  verify.json  trial.json
   implementer-transcript.json
-  implementer-events.jsonl
-  judge-transcripts/
+  judge-transcripts/<judge>.json
+  result.json                        # implement-job sentinel
+  results/judge-<judge>.json         # per-judge-job sentinel
 ```
 
-The final CLI output prints a file URL for `report.html`.
+`trial.json` is self-contained (`benchmark`, `artifacts`, `record`, `judge_scores`)
+so `aggregate.py` and any plotting script can consume a run without re-running it.
 
 ---
 
 ## Pi Sessions
 
-Real runs save Pi sessions by default, so you can inspect planner, implementer, and judge conversations in Pi's normal session browser/store.
-
-Disable this with:
-
-```bash
-uv run duobench --issue https://github.com/org/repo/issues/123 --models kimi-k2.6 --no-pi-sessions
-```
-
-Dry runs never create Pi sessions.
-
----
-
-## Running Long Benchmarks
-
-Use `tmux` and `--no-live` for remote machines:
-
-```bash
-tmux new-session -d -s duobench \
-  'cd /path/to/repo && \
-   PYTHONUNBUFFERED=1 uv run duobench \
-     --issue https://github.com/org/repo/issues/123 \
-     --models kimi-k2.6,gpt-5.5 \
-     --trials 1 \
-     --parallel 1 \
-     --no-live \
-     2>&1 | tee /tmp/duobench.log'
-```
-
-Monitor:
-
-```bash
-tmux attach -t duobench
-tail -f /tmp/duobench.log
-```
+Phase jobs save Pi sessions by default (descriptive names per role/condition/trial),
+so you can inspect planner, implementer, and judge conversations in Pi's session
+store. Pass `--no-pi-sessions` to disable.
 
 ---
 
 ## Safety Tips
 
-- ✅ **Default mode is safe for public upstream issues.** `--local-commit` is on by default, so implementers cannot push branches or open PRs. Every artifact stays in your local worktree under `runs/<timestamp>/`.
-- ✅ Start with `--dry-run`.
-- ✅ Start real runs with `--conditions one-condition --trials 1`.
-- ✅ Use `--parallel 1` until you are comfortable with the worktree setup.
-- ✅ Run against a test repository or issue first.
-- ⚠️ `--no-local-commit` opts back into the legacy PR-creating flow. Only use it when you intentionally want external PRs (e.g. on a fork you control). See [issue #11](https://github.com/alejandro-ao/agent-synergy-eval/issues/11) for the full safety rationale.
-- ⚠️ In legacy PR mode (`--no-local-commit`) one PR is created per implementer attempt. Judges are instructed not to mutate PRs, but implementers intentionally do.
+- ✅ Default mode (`--submission-mode local_commit`) is safe for public upstream
+  issues — no pushes, no PRs; everything stays under `runs/<timestamp>/`.
+- ✅ Start small: one condition, `--trial 0`, a test issue.
+- ✅ Keep the concurrency cap low (the skill defaults to 2 money-jobs at once).
+- ⚠️ `--submission-mode pr` is the legacy PR-creating flow — only use it on a fork
+  you control. See [issue #11](https://github.com/alejandro-ao/agent-synergy-eval/issues/11)
+  for the safety rationale.
 
 ---
 
@@ -386,24 +290,23 @@ tail -f /tmp/duobench.log
 
 | Problem | Solution |
 |---------|----------|
-| `--issue is required` | Real runs require a GitHub issue: `uv run duobench --issue https://github.com/org/repo/issues/123 --models kimi-k2.6` |
-| `gh CLI is required` | Install and authenticate: `gh auth login && gh auth status` |
-| Pi cannot find a model | Check `config/models.yaml`. `provider` and `model_id` must match what your Pi installation knows. |
-| Too many branches/PRs | Use fewer models, fewer trials, explicit `--conditions`, and `--parallel 1`. |
+| `--issue is required` | Pass `--issue https://github.com/org/repo/issues/123`. |
+| `gh CLI is required` | `gh auth login && gh auth status`. |
+| Pi cannot find a model | Check `provider`/`model_id` in `config/models.yaml` match your Pi install. |
+| A job seems stuck | `tmux attach -t <job>` and `tail -f <out>/job.log`; its `result.json` appears when done. |
+| Plots fail to import seaborn | `uv sync` (seaborn + pandas are declared deps). |
 
 ---
 
 ## Design
 
 - [`DESIGN.md`](DESIGN.md) — design rationale
-- [`.exploration/`](.exploration/) — architecture walkthrough generated for this codebase
+- `.claude/skills/duobench/SKILL.md` — the agent orchestration contract
 
 ---
 
 <div align="center">
 
 **Made with ❤️ by [Alejandro AO](https://github.com/alejandro-ao)**
-
-<a href="https://github.com/alejandro-ao/agent-synergy-eval/stargazers">⭐ Star this repo</a> if you find it useful!
 
 </div>

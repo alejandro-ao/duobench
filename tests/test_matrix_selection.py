@@ -2,7 +2,7 @@ import pytest
 
 from duobench.aggregate import TrialRecord, aggregate
 from duobench.config import Condition, Config, ConfigError, Model, Pricing, load_config
-from duobench.run import make_matrix_conditions, select_run_conditions
+from duobench.engine import make_matrix_conditions, select_run_conditions
 
 
 def _cfg() -> Config:
