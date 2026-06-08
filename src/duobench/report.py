@@ -115,23 +115,60 @@ def generate_report(run_dir: Path) -> Path:
         anchor = td.relative_to(run_dir).as_posix().replace("/", "-")
         trial = _load_json(td / "trial.json")
         verify = _load_json(td / "verify.json")
+        commit = _load_json(td / "commit.json")
         rec = trial.get("record", {})
         meta = trial.get("meta", {})
         benchmark = trial.get("benchmark") or {}
+        submission_mode = (
+            trial.get("artifacts", {}).get("submission_mode")
+            or meta.get("submission_mode")
+            or "pr"
+        )
         build_index = td / "build" / "index.html"
         body.append(f"<section id='{html.escape(anchor)}' class='card'><h2>{html.escape(td.parent.name)} / {html.escape(td.name)}</h2>")
+        submission_pill = f"<span class='pill'>mode: {html.escape(submission_mode)}</span>"
+        if submission_mode == "local_commit":
+            sha = commit.get("commit_sha") or meta.get("commit_sha") or verify.get("commit_sha") or ""
+            clean = commit.get("worktree_clean")
+            if clean is None:
+                clean = verify.get("worktree_clean")
+            cleanliness_pill = (
+                f"<span class='pill {'ok' if clean else 'bad'}'>worktree_clean: {clean}</span>"
+                if clean is not None
+                else ""
+            )
+            artifact_pill = f"<span class='pill'>commit: <code>{html.escape(str(sha)[:12])}</code></span>" if sha else "<span class='pill bad'>commit: missing</span>"
+        else:
+            pr_id = meta.get("pr_id") or verify.get("pr_id") or ""
+            artifact_pill = f"<span class='pill'>pr: {html.escape(str(pr_id))}</span>" if pr_id else "<span class='pill bad'>pr: missing</span>"
+            cleanliness_pill = ""
         body.append("".join([
             f"<span class='pill'>planner: {html.escape(str(rec.get('planner','')))}</span>",
             f"<span class='pill'>implementer: {html.escape(str(rec.get('implementer','')))}</span>",
             f"<span class='pill'>status: {html.escape(str(rec.get('impl_status','')))}</span>",
             f"<span class='pill'>cost: {_fmt_usd(rec.get('cost_usd',0))}</span>",
+            submission_pill,
+            artifact_pill,
             f"<span class='pill {'ok' if verify.get('boots_ok') else 'bad'}'>boots_ok: {verify.get('boots_ok')}</span>",
+            cleanliness_pill,
         ]))
         if benchmark.get("label"):
             body.append(f"<p class='muted'>benchmark: <code>{html.escape(str(benchmark.get('label')))}</code></p>")
         if build_index.exists():
             rel = _rel(run_dir, build_index)
             body.append(f"<p><a href='{rel}' target='_blank'>Open generated build in a new tab</a></p><iframe class='build-frame' src='{rel}'></iframe>")
+        if submission_mode == "local_commit" and commit.get("stat"):
+            body.append(
+                "<details><summary>Commit " + html.escape(str(commit.get("commit_sha", ""))[:12])
+                + " — " + html.escape(commit.get("branch", "") or "(branch?)")
+                + "</summary><div class='turn'><h4>git show --stat</h4><div class='pre'>"
+                + html.escape(commit.get("stat", "")) + "</div></div></details>"
+            )
+        if submission_mode == "local_commit" and commit.get("diff"):
+            body.append(
+                "<details><summary>Full diff</summary><div class='turn'><div class='pre'>"
+                + html.escape(commit.get("diff", "")) + "</div></div></details>"
+            )
         shots = meta.get("screenshots") or verify.get("screenshots") or []
         if shots:
             body.append("<h3>Screenshots</h3><div class='shots'>" + "".join(f"<a href='{_rel(run_dir,s)}' target='_blank'><img src='{_rel(run_dir,s)}'></a>" for s in shots) + "</div>")
