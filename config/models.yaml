@@ -6,7 +6,7 @@ models:
     provider: kimi-coding       # verified working in Pi RPC set_model
     model_id: kimi-for-coding
     thinking: high              # Pi RPC set_thinking_level high
-    pricing: { input: 0.95, output: 4.00 }
+    pricing: { input: 0.95, output: 4.00, cache_read: 0.16 }
   gpt-5.5:
     provider: openai-codex      # verified working in Pi RPC set_model
     model_id: gpt-5.5
