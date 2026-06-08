@@ -17,8 +17,8 @@ Hard requirement:
 Important context:
   - This project benchmarks planner × implementer LLM pairings through Pi RPC.
   - The planner receives `prompts/architect.md` and produces `plan.md`.
-  - The implementer receives `prompts/implement.md` with `{plan}` replaced by the planner output and writes a small MiniDesk browser app into `build/`.
-  - Judges score the build from source, screenshots, and smoke-test output.
+  - The implementer receives `prompts/implement.md` with `{plan}` replaced by the planner output and writes a small MiniDesk browser app into `build/`. **By default, `--local-commit` is on**: the implementer must create a single local commit and return its SHA. The harness installs safety wrappers (PATH-prepended `git`/`gh` rejecting `git push` and `gh pr create`) and removes the `upstream` remote, so the agent cannot push branches or open PRs against the upstream repository. Do not pass `--no-local-commit` unless you intentionally want external PRs.
+  - Judges score the build from source, screenshots, and smoke-test output. In local-commit mode the judge prompt asks the judge to inspect the commit, diff, and worktree state instead of a PR.
   - The final review artifact is `runs/<timestamp>/report.html`.
   - Raw transcripts/events are saved under each trial directory.
 

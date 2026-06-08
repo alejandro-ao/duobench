@@ -42,10 +42,10 @@
 **duobench** runs every planner/implementer pairing you choose through [Pi](https://pi.dev) RPC to measure which model duos produce the best **quality-per-dollar** for realistic software engineering work.
 
 ```
-┌─────────────┐     ┌─────────────────┐     ┌─────────────┐     ┌──────────┐
-│   GitHub    │────▶│     Planner     │────▶│ Implementer │────▶│    PR    │
-│    Issue    │     │  (plan + handoff)│     │  (code + push)│     │          │
-└─────────────┘     └─────────────────┘     └─────────────┘     └────┬─────┘
+┌─────────────┐     ┌─────────────────┐     ┌─────────────┐
+│   GitHub    │────▶│     Planner     │────▶│ Implementer │────▶ local commit
+│    Issue    │     │  (plan + handoff)│     │  (code only) │        │
+└─────────────┘     └─────────────────┘     └─────────────┘        │
                                                                      │
                               ┌──────────────────────────────────────┘
                               ▼
@@ -57,12 +57,14 @@
 
 ### What It Does
 
+By default (`--local-commit`, on), duobench is **safe to run against public upstream issues**:
+
 1. **Planner** inspects a GitHub issue and the local repo, then writes a handoff plan.
-2. **Implementer** receives the issue + plan in an isolated git worktree, fixes the issue, commits, pushes, and opens a PR.
-3. **Judge** models inspect the issue and PR with `git`/`gh` and score the result.
+2. **Implementer** receives the issue + plan in an isolated git worktree, makes code changes, runs checks, and creates exactly **one local commit**. The harness installs PATH-prepended `git`/`gh` safety wrappers and removes the `upstream` remote so the agent cannot push branches or open PRs.
+3. **Judge** models inspect the commit, diff, and worktree state with `git`/`gh` (read-only) and score the result.
 4. **Harness** writes transcripts, costs, charts, CSVs, and an HTML report.
 
-> ⚠️ **Real runs create branches and pull requests.** Use a repo where that is expected, and consider starting with one condition and one trial.
+> ℹ️ **No external side effects by default.** The implementer never pushes, never opens a PR, and never interacts with the upstream repository. Every artifact stays in your local worktree. To opt back into the legacy PR-creating flow (unsafe against public upstream issues), pass `--no-local-commit`. See [Safety Tips](#safety-tips) below.
 
 ---
 
@@ -192,6 +194,7 @@ uv run duobench report runs/<timestamp>
 | `--impl-timeout SEC` | `1800` | Implementer wall-clock timeout. |
 | `--judge-timeout SEC` | `300` | Per-judge timeout. |
 | `--pi-sessions` / `--no-pi-sessions` | on | Save Pi sessions in Pi's normal session store. |
+| `--local-commit` / `--no-local-commit` | on | `local-commit` (default): implementer produces a single local commit; no pushes, no PRs, no upstream interaction. `--no-local-commit` opts back into the legacy PR-creating flow. |
 | `--live` / `--no-live` | auto (TTY) | Rich live dashboard. |
 | `--skip-model-check` | off | Skip the fail-fast Pi model/auth validation pass. |
 | `--debug` | off | Show full Python tracebacks on errors. |
@@ -269,21 +272,25 @@ conditions:
 - Produce a concise implementation plan
 - **Avoid** modifying files, branches, commits, pushes, or PRs
 
-### Implementer
+### Implementer (default: `--local-commit`)
 
-- Inspect the issue with `gh`
-- Create a branch in an isolated worktree
-- Make code changes and run appropriate checks
-- Commit, push, and open a PR
-- Return only the PR id or PR URL
+- Inspect the issue with `gh` (read-only)
+- Make code changes and run appropriate checks in the worktree
+- Create exactly one local commit
+- **Do not push, do not open a PR, do not interact with the `upstream` remote**
+- Return only the commit SHA (full 40-char or short 7+)
+
+The harness enforces the safety contract in three layers: (1) the prompt forbids the actions, (2) PATH-prepended `git`/`gh` wrappers reject `git push` and `gh pr create|edit|merge|...`, and (3) the `upstream` remote is removed from the worktree.
+
+To use the legacy PR-creating flow (unsafe against public upstream issues), pass `--no-local-commit`. In PR mode the implementer creates a branch, pushes to `origin`, opens a PR, and returns the PR id.
 
 ### Judge
 
-Each judge receives the issue URL, PR id, planner handoff, and harness metadata. It can inspect the PR with `git` and `gh`, but must not mutate anything.
+Each judge receives the issue URL, the implementer commit SHA (or PR id in PR mode), the planner handoff, and harness metadata. It can inspect the commit/diff/worktree (or PR) with `git` and `gh` (read-only), but must not mutate anything.
 
 | Dimension | Meaning |
 |-----------|---------|
-| `task_completion` | Does the PR address the issue and avoid unrelated work? |
+| `task_completion` | Does the commit/PR address the issue and avoid unrelated work? |
 | `correctness` | Is the behavior likely correct and robust? |
 | `code_quality` | Are changes maintainable, idiomatic, and appropriately scoped? |
 | `verification` | Were meaningful tests/checks included or run? |
@@ -313,6 +320,7 @@ conditions/<condition-id>/trial-<n>/
   plan.md
   worktree/
   verify.json
+  commit.json            # local-commit mode: commit SHA, diff, worktree cleanliness
   trial.json
   implementer-transcript.json
   implementer-events.jsonl
@@ -364,12 +372,13 @@ tail -f /tmp/duobench.log
 
 ## Safety Tips
 
+- ✅ **Default mode is safe for public upstream issues.** `--local-commit` is on by default, so implementers cannot push branches or open PRs. Every artifact stays in your local worktree under `runs/<timestamp>/`.
 - ✅ Start with `--dry-run`.
 - ✅ Start real runs with `--conditions one-condition --trials 1`.
-- ✅ Use `--parallel 1` until you are comfortable with branch/PR behavior.
+- ✅ Use `--parallel 1` until you are comfortable with the worktree setup.
 - ✅ Run against a test repository or issue first.
-- ⚠️ Expect one PR per implementer attempt.
-- ⚠️ Judges are instructed not to mutate PRs, but implementers intentionally do.
+- ⚠️ `--no-local-commit` opts back into the legacy PR-creating flow. Only use it when you intentionally want external PRs (e.g. on a fork you control). See [issue #11](https://github.com/alejandro-ao/agent-synergy-eval/issues/11) for the full safety rationale.
+- ⚠️ In legacy PR mode (`--no-local-commit`) one PR is created per implementer attempt. Judges are instructed not to mutate PRs, but implementers intentionally do.
 
 ---
 

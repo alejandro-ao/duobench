@@ -4,8 +4,19 @@ Each judge model scores task_completion / correctness / code_quality / verificat
 (1-10) as strict JSON. Cost efficiency is NOT judged — it's computed objectively in
 results aggregation.
 
-Inputs per PR: GitHub issue URL, implementer-returned PR id, planner handoff plan,
-and harness metadata. Judges use local git/gh tools to inspect the PR.
+Inputs per build:
+
+* The GitHub issue URL.
+* The planner's handoff plan.
+* Either the implementer-returned PR id (legacy ``pr`` mode) or the commit SHA
+  (``local_commit`` mode, the default since #11). In local-commit mode the judge
+  inspects the local commit, its diff, and the worktree state instead of a PR.
+* The full diff / `git show --stat` text and worktree cleanliness status when in
+  local-commit mode.
+* Automated harness metadata when available.
+
+Judges use local git and ``gh`` (read-only) to inspect artifacts. They must not
+modify files, commit, push, or open PRs.
 
 Scores are averaged across the panel. Raw per-judge scores are kept so a judge×build
 self-bias matrix can be plotted.
@@ -128,18 +139,25 @@ def judge_build(
     screenshots: list[str],
     *,
     issue_url: str,
-    pr_id: str,
-    plan: str,
+    pr_id: str = "",
+    commit_sha: str = "",
+    plan: str = "",
     timeout: float = 300.0,
     transcript_path: Path | None = None,
     persist_pi_session: bool = False,
     session_name: str | None = None,
     ui=None,
 ) -> JudgeScore:
+    """Score one build. Either ``pr_id`` (PR mode) or ``commit_sha`` (local-commit mode)
+    must be provided so the judge prompt has a concrete artifact to inspect. When the
+    prompt template uses ``{commit_sha}`` (local-commit variant) the commit SHA is
+    substituted; when it uses ``{pr_id}`` (PR variant) the PR id is substituted. Both
+    placeholders are left as-is for whichever one the prompt does not use."""
     prompt = (
         judge_prompt_template
         .replace("{issue_url}", issue_url)
         .replace("{pr_id}", pr_id)
+        .replace("{commit_sha}", commit_sha)
         .replace("{plan}", plan)
         .replace("{smoke_results}", smoke_summary)
     )
@@ -220,6 +238,7 @@ def judge_panel(
     *,
     issue_url: str = "",
     pr_id: str = "",
+    commit_sha: str = "",
     plan: str = "",
     timeout: float = 300.0,
     transcripts_dir: Path | None = None,
@@ -227,7 +246,12 @@ def judge_panel(
     session_name_prefix: str | None = None,
     ui=None,
 ) -> list[JudgeScore]:
-    """Run every configured judge over one build."""
+    """Run every configured judge over one build.
+
+    Pass ``pr_id`` for PR-mode trials or ``commit_sha`` for local-commit trials
+    (see #11). The judge prompt's ``{pr_id}``/``{commit_sha}`` placeholder
+    decides which one the model actually inspects.
+    """
     source = collect_source(build_dir)
     scores: list[JudgeScore] = []
     for judge_key in cfg.judges:
@@ -240,6 +264,7 @@ def judge_panel(
                 source, smoke_summary, screenshots,
                 issue_url=issue_url,
                 pr_id=pr_id,
+                commit_sha=commit_sha,
                 plan=plan,
                 timeout=timeout,
                 transcript_path=transcript_path,

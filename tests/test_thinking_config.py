@@ -59,6 +59,23 @@ def test_pi_session_persistence_controls_no_session_flag(monkeypatch, tmp_path):
     assert "--no-session" in captured["args"]
 
 
+def test_pi_session_prepends_extra_path(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_popen(args, **kwargs):
+        captured["env"] = kwargs["env"]
+        return _FakeProc()
+
+    monkeypatch.setattr("duobench.pi_rpc.subprocess.Popen", fake_popen)
+
+    extra = tmp_path / "bin"
+    extra.mkdir()
+    with PiSession(cwd=tmp_path, extra_path=extra):
+        pass
+
+    assert captured["env"]["PATH"].split(":")[0] == str(extra)
+
+
 def test_shared_plan_passes_configured_thinking_level_to_plan_phase(tmp_path, monkeypatch):
     import duobench.run as run_mod
 

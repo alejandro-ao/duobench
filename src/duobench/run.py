@@ -493,8 +493,126 @@ fi
     _git(["config", "--worktree", "core.hooksPath", ".git-hooks"], worktree_dir)
 
 
-def prepare_worktree(repo_dir: Path, worktree_dir: Path, *, branch: str) -> Path:
-    """Create an isolated git worktree for one implementer trial."""
+# Wrapper scripts installed in the implementer worktree's local bin directory.
+# They are placed earlier on PATH than the system git/gh so they take precedence
+# when the agent invokes bare command names. The agent can still call absolute
+# paths, so these wrappers are defense-in-depth alongside prompt guidance and
+# remote management, not a hard sandbox.
+_GIT_WRAPPER_BODY = """#!/bin/sh
+# duobench local-commit safety wrapper for `git`. Blocks `git push` so the
+# implementer cannot publish branches; all other git commands pass through.
+# Set DUOBENCH_BLOCK_GIT_PUSH=0 to disable (e.g. in PR submission mode).
+if [ "${DUOBENCH_BLOCK_GIT_PUSH:-1}" = "1" ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      push)
+        echo "duobench: 'git push' is disabled in local-commit benchmark mode (set DUOBENCH_BLOCK_GIT_PUSH=0 to override)" >&2
+        exit 1
+        ;;
+    esac
+  done
+fi
+exec "__DUOBENCH_REAL_GIT__" "$@"
+"""
+
+_GH_WRAPPER_BODY = """#!/bin/sh
+# duobench local-commit safety wrapper for `gh`. Blocks `gh pr create|edit|...`
+# (anything that opens or mutates a pull request) so the implementer cannot
+# publish PRs. Read-only `gh issue view` / `gh pr view` remain available.
+# Set DUOBENCH_BLOCK_GH_PR=0 to disable (e.g. in PR submission mode).
+if [ "${DUOBENCH_BLOCK_GH_PR:-1}" = "1" ]; then
+  # Find the first non-flag positional argument: that's the gh subcommand.
+  subcommand=""
+  for arg in "$@"; do
+    case "$arg" in
+      -*) continue ;;
+      *) subcommand="$arg"; break ;;
+    esac
+  done
+  if [ "$subcommand" = "pr" ]; then
+    # Find the first non-flag positional argument after `pr`: that's the pr verb.
+    next=""
+    saw_pr=0
+    for arg in "$@"; do
+      if [ $saw_pr -eq 0 ]; then
+        if [ "$arg" = "pr" ] || [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
+          if [ "$arg" = "pr" ]; then saw_pr=1; fi
+          continue
+        fi
+      else
+        case "$arg" in
+          -*) continue ;;
+          *) next="$arg"; break ;;
+        esac
+      fi
+    done
+    case "$next" in
+      create|edit|close|reopen|merge|ready|review|comment|lock|unlock|delete-branch|update-branch)
+        echo "duobench: 'gh pr $next' is disabled in local-commit benchmark mode (set DUOBENCH_BLOCK_GH_PR=0 to override)" >&2
+        exit 1
+        ;;
+    esac
+  fi
+fi
+exec "__DUOBENCH_REAL_GH__" "$@"
+"""
+
+
+def _install_local_commit_safety(worktree_dir: Path) -> Path:
+    """Install a worktree-local bin/ with `git`/`gh` wrappers blocking external mutations.
+
+    Returns the bin directory path. The harness prepends it to PATH for the
+    implementer Pi subprocess so the wrappers take precedence over system git/gh
+    when the agent invokes bare command names. The wrappers are advisory — the
+    agent could still call absolute paths, so this is defense-in-depth alongside
+    prompt guidance and the upstream-remote removal below.
+    """
+    bin_dir = worktree_dir / ".duobench-bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    git_bin = shutil.which("git") or "git"
+    gh_bin = shutil.which("gh") or "gh"
+    wrappers = (
+        ("git", _GIT_WRAPPER_BODY.replace("__DUOBENCH_REAL_GIT__", git_bin)),
+        ("gh", _GH_WRAPPER_BODY.replace("__DUOBENCH_REAL_GH__", gh_bin)),
+    )
+    for name, body in wrappers:
+        path = bin_dir / name
+        path.write_text(body, encoding="utf-8")
+        path.chmod(0o755)
+    return bin_dir
+
+
+def _remove_upstream_remote(worktree_dir: Path) -> None:
+    """Best-effort removal of the `upstream` remote so the agent can't push to it.
+
+    If the remote is absent, this is a no-op. Errors are swallowed so the
+    benchmark continues even on weirdly configured clones.
+    """
+    try:
+        _git(["remote", "remove", "upstream"], worktree_dir, timeout=15.0)
+    except ConfigError:
+        pass
+
+
+def prepare_worktree(
+    repo_dir: Path,
+    worktree_dir: Path,
+    *,
+    branch: str,
+    submission_mode: str = "local_commit",
+) -> Path:
+    """Create an isolated git worktree for one implementer trial.
+
+    ``submission_mode`` controls the safety scaffolding installed in the worktree:
+
+    * ``"local_commit"`` (default): installs PATH-prepended `git`/`gh` wrappers
+      that reject `git push` and `gh pr create`/`gh pr edit`, removes the
+      `upstream` remote, and keeps the origin-only pre-push hook as a secondary
+      defense. The agent cannot publish branches or PRs.
+    * ``"pr"``: installs only the pre-push hook that rejects pushes to
+      non-origin remotes (legacy behavior from #9). The agent is expected to
+      push to origin and open a PR against origin.
+    """
     _git(["rev-parse", "--show-toplevel"], repo_dir)
     worktree_dir.parent.mkdir(parents=True, exist_ok=True)
     if worktree_dir.exists():
@@ -503,6 +621,9 @@ def prepare_worktree(repo_dir: Path, worktree_dir: Path, *, branch: str) -> Path
     origin_repo = _origin_repo_slug(_git(["remote", "get-url", "origin"], worktree_dir))
     _gh(["repo", "set-default", origin_repo], worktree_dir)
     _install_origin_only_push_guard(worktree_dir)
+    if submission_mode == "local_commit":
+        _install_local_commit_safety(worktree_dir)
+        _remove_upstream_remote(worktree_dir)
     return worktree_dir
 
 
@@ -691,6 +812,86 @@ def copy_plan_artifacts(plan: SharedPlan, trial_dir: Path) -> None:
         (trial_dir / "plan.md").write_text(plan.plan_text)
 
 
+# Captured commit metadata per trial: SHA, full diff/patch, worktree cleanliness.
+# Stored under trial_dir/commit.json; consumed by both the harness and the judge.
+_MAX_DIFF_CHARS = 200_000
+_MAX_STAT_CHARS = 30_000
+
+
+def _capture_commit_artifacts(
+    worktree_dir: Path,
+    commit_sha: str,
+    *,
+    trial_dir: Path | None = None,
+) -> dict:
+    """Record a local commit's metadata, diff, and worktree cleanliness.
+
+    The result is JSON-serializable and written to ``<trial_dir>/commit.json``
+    when ``trial_dir`` is provided. Errors are recorded but do not raise: a
+    benchmark that fails to capture commit artifacts should still produce a
+    results.json. Returns the dict either way.
+    """
+    artifact: dict = {
+        "commit_sha": commit_sha,
+        "worktree": str(worktree_dir),
+        "diff": "",
+        "stat": "",
+        "worktree_clean": True,
+        "uncommitted_files": [],
+        "branch": "",
+        "notes": [],
+    }
+    if not commit_sha or not worktree_dir.exists():
+        artifact["notes"].append("missing commit_sha or worktree dir; nothing captured")
+        return artifact
+
+    # Branch + cleanliness
+    try:
+        artifact["branch"] = _git(["branch", "--show-current"], worktree_dir, timeout=15.0)
+    except ConfigError as e:
+        artifact["notes"].append(f"branch detection failed: {e}")
+    try:
+        status = _git(["status", "--porcelain"], worktree_dir, timeout=15.0)
+        artifact["worktree_clean"] = status.strip() == ""
+        artifact["uncommitted_files"] = [line for line in status.splitlines() if line.strip()]
+    except ConfigError as e:
+        artifact["notes"].append(f"worktree status failed: {e}")
+        artifact["worktree_clean"] = False
+
+    # git show --stat
+    try:
+        stat = _git(
+            ["show", "--stat", "--no-color", "--format=", commit_sha],
+            worktree_dir,
+            timeout=30.0,
+        )
+        if len(stat) > _MAX_STAT_CHARS:
+            stat = stat[:_MAX_STAT_CHARS] + f"\n[...stat truncated at {_MAX_STAT_CHARS} chars...]\n"
+        artifact["stat"] = stat
+    except ConfigError as e:
+        artifact["notes"].append(f"git show --stat failed: {e}")
+
+    # Full diff (capped to keep verify.json bounded).
+    try:
+        diff = _git(["show", "--no-color", "--format=", commit_sha], worktree_dir, timeout=60.0)
+        if len(diff) > _MAX_DIFF_CHARS:
+            diff = diff[:_MAX_DIFF_CHARS] + f"\n[...diff truncated at {_MAX_DIFF_CHARS} chars...]\n"
+        artifact["diff"] = diff
+    except ConfigError as e:
+        artifact["notes"].append(f"git show diff failed: {e}")
+
+    if trial_dir is not None:
+        (trial_dir / "commit.json").write_text(json.dumps(artifact, indent=2))
+    return artifact
+
+
+def _dry_run_commit_sha(cond_id: str, trial: int) -> str:
+    """Deterministic 40-char hex SHA for dry-run trials so the rest of the
+    pipeline can record a stable commit artifact in dry-run mode."""
+    digest = hashlib.sha256(f"duobench:local-commit:{cond_id}:{trial}".encode("utf-8")).hexdigest()
+    return digest[:40]
+
+
 def run_condition_trial(
     cfg: Config,
     cond: Condition,
@@ -705,6 +906,7 @@ def run_condition_trial(
     judge_timeout: float,
     save_pi_sessions: bool = False,
     run_label: str = "run",
+    submission_mode: str = "local_commit",
     ui=None,
 ) -> tuple[TrialRecord, dict]:
     benchmark = make_benchmark_fingerprint(
@@ -718,7 +920,9 @@ def run_condition_trial(
     build_dir = trial_dir / ("build" if dry_run else "worktree")
     shots_dir = trial_dir / "screenshots"
     pr_id = ""
-    (ui.log if ui else print)(f"  [{cond.id} trial {trial}] plan={cond.planner} impl={cond.implementer}")
+    commit_sha = ""
+    local_bin_dir: Path | None = None
+    (ui.log if ui else print)(f"  [{cond.id} trial {trial}] plan={cond.planner} impl={cond.implementer} mode={submission_mode}")
 
     # --- plan handoff ---
     copy_plan_artifacts(shared_plan, trial_dir)
@@ -734,11 +938,14 @@ def run_condition_trial(
         usage = _fake_usage(cond.id, "implement", trial)
         ic = compute_cost(usage, implementer)
         impl_duration = float(_stable_int(f"{cond.id}:impl:{trial}:duration", 90, 900))
+        fake_assistant_text = (
+            _dry_run_commit_sha(cond.id, trial) if submission_mode == "local_commit" else "1"
+        )
         _write_fake_transcript(
             phase="implementer",
             model=implementer,
             prompt=_format_prompt_template(prompts["implement"], issue_url=_issue_url_from(prompts), plan=plan_text),
-            assistant_text="1",
+            assistant_text=fake_assistant_text,
             usage=usage,
             cost=ic,
             path=trial_dir / "implementer-transcript.json",
@@ -748,10 +955,44 @@ def run_condition_trial(
         impl_cost = ic.usd
         impl_source = ic.source
         impl_status = "complete"
-        pr_id = "1"
+        if submission_mode == "local_commit":
+            commit_sha = _dry_run_commit_sha(cond.id, trial)
+            # Emit a synthetic commit.json so dry-run output matches the real
+            # schema (judge.py and report.py read commit.json when present).
+            synthetic_diff = (
+                f"diff --git a/{cond.id}.txt b/{cond.id}.txt\n"
+                f"new file mode 100644\n"
+                f"index 0000000..{commit_sha[:7]}\n"
+                f"--- /dev/null\n"
+                f"+++ b/{cond.id}.txt\n"
+                f"@@ -0,0 +1 @@\n"
+                f"+dry-run synthetic change for {cond.id} trial {trial}\n"
+            )
+            commit_artifact = {
+                "commit_sha": commit_sha,
+                "worktree": str(build_dir),
+                "branch": f"duobench/{run_label}/{cond.id}/trial-{trial}",
+                "diff": synthetic_diff,
+                "stat": f" {cond.id}.txt | 1 +\n 1 file changed, 1 insertion(+)\n",
+                "worktree_clean": True,
+                "uncommitted_files": [],
+                "notes": ["synthetic dry-run commit artifact; no real model or git call was made"],
+            }
+            (trial_dir / "commit.json").write_text(json.dumps(commit_artifact, indent=2))
+        else:
+            pr_id = "1"
     else:
         branch = _safe_path_part(f"duobench/{run_label}/{cond.id}/trial-{trial}")
-        prepare_worktree(Path.cwd(), build_dir, branch=branch)
+        worktree_dir = prepare_worktree(Path.cwd(), build_dir, branch=branch, submission_mode=submission_mode)
+        # The implementer writes its build into the worktree dir. Prefer the
+        # actual returned path so callers/tests that override `build_dir` still
+        # see the right location for capture-commit and verify.
+        build_dir = worktree_dir
+        # The safety bin dir is .duobench-bin inside the worktree (only installed
+        # in local_commit mode; in pr mode the directory does not exist).
+        candidate_bin = worktree_dir / ".duobench-bin"
+        if candidate_bin.is_dir():
+            local_bin_dir = candidate_bin
         impl = run_impl_phase(
             implementer,
             _format_prompt_template(prompts["implement"], issue_url=_issue_url_from(prompts), plan=plan_text),
@@ -762,6 +1003,8 @@ def run_condition_trial(
             thinking_level=implementer.thinking_level,
             persist_pi_session=save_pi_sessions,
             session_name=_pi_session_name(run_label, "implementer", cond.implementer, trial=trial, condition_id=cond.id),
+            submission_mode=submission_mode,
+            extra_path=local_bin_dir,
             ui=ui,
         )
         impl_cost = impl.cost.usd
@@ -769,6 +1012,7 @@ def run_condition_trial(
         impl_status = impl.status
         impl_duration = impl.duration_s
         pr_id = impl.pr_id
+        commit_sha = impl.commit_sha
 
     # --- verify / harness metadata ---
     if dry_run:
@@ -781,17 +1025,42 @@ def run_condition_trial(
         smoke_summary = vres.summary_for_judge()
         screenshots = vres.screenshots
     else:
-        if ui:
-            ui.start_phase("Recording PR metadata", "git/gh")
-        verify_payload = {
-            "pr_id": pr_id,
-            "worktree": str(build_dir),
-            "notes": ["Implementation agent is responsible for tests, commit, push, and PR creation."],
-        }
+        if submission_mode == "local_commit":
+            if ui:
+                ui.start_phase("Capturing commit metadata", "git")
+            commit_artifact = _capture_commit_artifacts(build_dir, commit_sha, trial_dir=trial_dir)
+            if not commit_artifact.get("worktree_clean"):
+                commit_artifact.setdefault("notes", []).append(
+                    "worktree is dirty beyond the recorded commit"
+                )
+            if ui:
+                ui.end_phase("complete" if commit_sha else "missing commit SHA")
+            verify_payload = {
+                "submission_mode": "local_commit",
+                "commit_sha": commit_sha,
+                "worktree": str(build_dir),
+                "worktree_clean": commit_artifact.get("worktree_clean"),
+                "uncommitted_files": commit_artifact.get("uncommitted_files", []),
+                "branch": commit_artifact.get("branch", ""),
+                "commit": commit_artifact,
+                "notes": [
+                    "Local-commit benchmark mode: implementer produces a local commit; "
+                    "judge evaluates the commit, diff, and worktree state."
+                ],
+            }
+        else:
+            if ui:
+                ui.start_phase("Recording PR metadata", "git/gh")
+            verify_payload = {
+                "submission_mode": "pr",
+                "pr_id": pr_id,
+                "worktree": str(build_dir),
+                "notes": ["Implementation agent is responsible for tests, commit, push, and PR creation."],
+            }
+            if ui:
+                ui.end_phase("complete" if pr_id else "missing PR id")
         smoke_summary = json.dumps(verify_payload, indent=2)
         screenshots = []
-        if ui:
-            ui.end_phase("complete" if pr_id else "missing PR id")
     (trial_dir / "verify.json").write_text(json.dumps(verify_payload, indent=2))
 
     record = TrialRecord(
@@ -811,8 +1080,10 @@ def run_condition_trial(
     record_meta = {
         "build_dir": str(build_dir),
         "pr_id": pr_id,
+        "commit_sha": commit_sha,
         "smoke_summary": smoke_summary,
         "screenshots": screenshots,
+        "submission_mode": submission_mode,
     }
     artifacts = {
         "plan": {
@@ -821,8 +1092,16 @@ def run_condition_trial(
             "trial": shared_plan.trial,
             "source_dir": str(shared_plan.source_dir),
             "cost_usd": round(shared_plan.cost_usd, 6),
-        }
+        },
+        "submission_mode": submission_mode,
     }
+    if submission_mode == "local_commit":
+        artifacts["commit"] = {
+            "sha": commit_sha,
+            "worktree": str(build_dir),
+        }
+    else:
+        artifacts["pr"] = {"id": pr_id}
     (trial_dir / "trial.json").write_text(json.dumps(
         {
             "benchmark": benchmark.to_dict(),
@@ -851,6 +1130,7 @@ def run_condition_trials(
     parallel_workers: int = 1,
     save_pi_sessions: bool = False,
     run_label: str = "run",
+    submission_mode: str = "local_commit",
     ui=None,
 ) -> tuple[list[TrialRecord], list[dict]]:
     jobs: list[tuple[int, Condition, int, Path]] = []
@@ -881,6 +1161,7 @@ def run_condition_trials(
                 judge_timeout=judge_timeout,
                 save_pi_sessions=save_pi_sessions,
                 run_label=run_label,
+                submission_mode=submission_mode,
                 ui=phase_ui,
             )
             if ui:
@@ -948,6 +1229,9 @@ def _write_dry_run_judge_transcripts(
     trial_dir: Path,
     judge_prompt: str,
     trial: int,
+    *,
+    commit_sha: str = "",
+    submission_mode: str = "local_commit",
 ) -> None:
     judge_dir = trial_dir / "judge-transcripts"
     judge_dir.mkdir(parents=True, exist_ok=True)
@@ -968,6 +1252,7 @@ def _write_dry_run_judge_transcripts(
             judge_prompt
             .replace("{issue_url}", DEFAULT_ISSUE_URL)
             .replace("{pr_id}", "1")
+            .replace("{commit_sha}", commit_sha or _dry_run_commit_sha(trial_dir.parent.name, trial))
             .replace("{plan}", "[dry-run synthetic plan]")
             .replace("{smoke_results}", "[dry-run synthetic smoke results]")
         )
@@ -1021,6 +1306,11 @@ def _main() -> None:
                     help="planner/build concurrency: 'auto' (default), 'all', or a positive integer; use 1 for serial")
     rp.add_argument("--pi-sessions", action=argparse.BooleanOptionalAction, default=True,
                     help="save real Pi RPC sessions in Pi's default session store with descriptive names")
+    rp.add_argument("--local-commit", action=argparse.BooleanOptionalAction, default=True,
+                    help="local-commit benchmark mode (default): implementer produces a single local commit; "
+                         "no pushes, no PRs, no upstream remote interaction. Use --no-local-commit to opt "
+                         "back into the legacy PR-creating flow (PR mode is unsafe to run against public "
+                         "upstream issues — see #11).")
     rp.add_argument("--live", action=argparse.BooleanOptionalAction, default=None,
                     help="enable/disable the Rich live dashboard (default: auto when attached to a TTY)")
     rp.add_argument("--skip-model-check", action="store_true", help="skip fail-fast Pi model/auth validation")
@@ -1052,11 +1342,14 @@ def _main() -> None:
 
     issue_url = _load_issue_url(args.issue, dry_run=args.dry_run)
     _check_issue_prereqs(dry_run=args.dry_run)
+    submission_mode = "local_commit" if args.local_commit else "pr"
+    implement_prompt_name = "implement_local_commit.md" if submission_mode == "local_commit" else "implement.md"
+    judge_prompt_name = "judge_local_commit.md" if submission_mode == "local_commit" else "judge.md"
     prompts = {
         "issue_url": issue_url,
         "architect": _load_prompt("architect.md"),
-        "implement": _load_prompt("implement.md"),
-        "judge": _load_prompt("judge.md"),
+        "implement": _load_prompt(implement_prompt_name),
+        "judge": _load_prompt(judge_prompt_name),
     }
 
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
@@ -1077,7 +1370,11 @@ def _main() -> None:
     plan_jobs = len(_unique_planners(conditions)) * args.trials
     impl_jobs = len(conditions) * args.trials
     judge_jobs = impl_jobs * len(cfg.judges)
-    ui.log(f"phase plan: {plan_jobs} shared planner run(s) → PR: {impl_jobs} implementation run(s) → judge: {judge_jobs} judge run(s)")
+    submission_label = "local commit" if submission_mode == "local_commit" else "PR"
+    ui.log(
+        f"phase plan: {plan_jobs} shared planner run(s) → {submission_label}: "
+        f"{impl_jobs} implementation run(s) → judge: {judge_jobs} judge run(s)"
+    )
     ui.log(f"Pi sessions: {'saved with descriptive names' if args.pi_sessions and not args.dry_run else 'not saved'}")
     if not args.dry_run and not args.skip_model_check:
         # Resolve registry aliases (e.g. `kimi-k2.6`) to full Pi specs before
@@ -1144,6 +1441,7 @@ def _main() -> None:
         parallel_workers=parallel_workers,
         save_pi_sessions=args.pi_sessions and not args.dry_run,
         run_label=run_dir.name,
+        submission_mode=submission_mode,
         ui=ui,
     )
 
@@ -1160,7 +1458,15 @@ def _main() -> None:
             }
             rec.dimensions = average_dimensions(scores)
             trial_dir = Path(meta["build_dir"]).parent
-            _write_dry_run_judge_transcripts(cfg, scores, trial_dir, prompts["judge"], rec.trial)
+            _write_dry_run_judge_transcripts(
+                cfg,
+                scores,
+                trial_dir,
+                prompts["judge"],
+                rec.trial,
+                commit_sha=meta.get("commit_sha", ""),
+                submission_mode=submission_mode,
+            )
             existing_trial = json.loads((trial_dir / "trial.json").read_text())
             (trial_dir / "trial.json").write_text(json.dumps(
                 {
@@ -1181,6 +1487,7 @@ def _main() -> None:
             meta["smoke_summary"], meta["screenshots"],
             issue_url=_issue_url_from(prompts),
             pr_id=meta.get("pr_id", ""),
+            commit_sha=meta.get("commit_sha", ""),
             plan=(trial_dir / "plan.md").read_text() if (trial_dir / "plan.md").exists() else "",
             timeout=args.judge_timeout,
             transcripts_dir=trial_dir / "judge-transcripts",
