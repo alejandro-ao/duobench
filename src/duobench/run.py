@@ -493,8 +493,120 @@ fi
     _git(["config", "--worktree", "core.hooksPath", ".git-hooks"], worktree_dir)
 
 
-def prepare_worktree(repo_dir: Path, worktree_dir: Path, *, branch: str) -> Path:
-    """Create an isolated git worktree for one implementer trial."""
+# Wrapper scripts installed in the implementer worktree's local bin directory.
+# They are placed earlier on PATH than the system git/gh so they take precedence
+# when the agent invokes bare command names. The agent can still call absolute
+# paths, so these wrappers are defense-in-depth alongside prompt guidance and
+# remote management, not a hard sandbox.
+_GIT_WRAPPER_BODY = """#!/bin/sh
+# duobench local-commit safety wrapper for `git`. Blocks `git push` so the
+# implementer cannot publish branches; all other git commands pass through.
+# Set DUOBENCH_BLOCK_GIT_PUSH=0 to disable (e.g. in PR submission mode).
+if [ "${DUOBENCH_BLOCK_GIT_PUSH:-1}" = "1" ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      push)
+        echo "duobench: 'git push' is disabled in local-commit benchmark mode (set DUOBENCH_BLOCK_GIT_PUSH=0 to override)" >&2
+        exit 1
+        ;;
+    esac
+  done
+fi
+exec /usr/bin/env -i PATH="/usr/local/bin:/usr/bin:/bin" HOME="$HOME" git "$@"
+"""
+
+_GH_WRAPPER_BODY = """#!/bin/sh
+# duobench local-commit safety wrapper for `gh`. Blocks `gh pr create|edit|...`
+# (anything that opens or mutates a pull request) so the implementer cannot
+# publish PRs. Read-only `gh issue view` / `gh pr view` remain available.
+# Set DUOBENCH_BLOCK_GH_PR=0 to disable (e.g. in PR submission mode).
+if [ "${DUOBENCH_BLOCK_GH_PR:-1}" = "1" ]; then
+  # Find the first non-flag positional argument: that's the gh subcommand.
+  subcommand=""
+  for arg in "$@"; do
+    case "$arg" in
+      -*) continue ;;
+      *) subcommand="$arg"; break ;;
+    esac
+  done
+  if [ "$subcommand" = "pr" ]; then
+    # Find the first non-flag positional argument after `pr`: that's the pr verb.
+    next=""
+    saw_pr=0
+    for arg in "$@"; do
+      if [ $saw_pr -eq 0 ]; then
+        if [ "$arg" = "pr" ] || [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
+          if [ "$arg" = "pr" ]; then saw_pr=1; fi
+          continue
+        fi
+      else
+        case "$arg" in
+          -*) continue ;;
+          *) next="$arg"; break ;;
+        esac
+      fi
+    done
+    case "$next" in
+      create|edit|close|reopen|merge|ready|review|comment|lock|unlock|delete-branch|update-branch)
+        echo "duobench: 'gh pr $next' is disabled in local-commit benchmark mode (set DUOBENCH_BLOCK_GH_PR=0 to override)" >&2
+        exit 1
+        ;;
+    esac
+  fi
+fi
+exec /usr/bin/env -i PATH="/usr/local/bin:/usr/bin:/bin" HOME="$HOME" gh "$@"
+"""
+
+
+def _install_local_commit_safety(worktree_dir: Path) -> Path:
+    """Install a worktree-local bin/ with `git`/`gh` wrappers blocking external mutations.
+
+    Returns the bin directory path. The harness prepends it to PATH for the
+    implementer Pi subprocess so the wrappers take precedence over system git/gh
+    when the agent invokes bare command names. The wrappers are advisory — the
+    agent could still call absolute paths, so this is defense-in-depth alongside
+    prompt guidance and the upstream-remote removal below.
+    """
+    bin_dir = worktree_dir / ".duobench-bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    for name, body in (("git", _GIT_WRAPPER_BODY), ("gh", _GH_WRAPPER_BODY)):
+        path = bin_dir / name
+        path.write_text(body, encoding="utf-8")
+        path.chmod(0o755)
+    return bin_dir
+
+
+def _remove_upstream_remote(worktree_dir: Path) -> None:
+    """Best-effort removal of the `upstream` remote so the agent can't push to it.
+
+    If the remote is absent, this is a no-op. Errors are swallowed so the
+    benchmark continues even on weirdly configured clones.
+    """
+    try:
+        _git(["remote", "remove", "upstream"], worktree_dir, timeout=15.0)
+    except ConfigError:
+        pass
+
+
+def prepare_worktree(
+    repo_dir: Path,
+    worktree_dir: Path,
+    *,
+    branch: str,
+    submission_mode: str = "local_commit",
+) -> Path:
+    """Create an isolated git worktree for one implementer trial.
+
+    ``submission_mode`` controls the safety scaffolding installed in the worktree:
+
+    * ``"local_commit"`` (default): installs PATH-prepended `git`/`gh` wrappers
+      that reject `git push` and `gh pr create`/`gh pr edit`, removes the
+      `upstream` remote, and keeps the origin-only pre-push hook as a secondary
+      defense. The agent cannot publish branches or PRs.
+    * ``"pr"``: installs only the pre-push hook that rejects pushes to
+      non-origin remotes (legacy behavior from #9). The agent is expected to
+      push to origin and open a PR against origin.
+    """
     _git(["rev-parse", "--show-toplevel"], repo_dir)
     worktree_dir.parent.mkdir(parents=True, exist_ok=True)
     if worktree_dir.exists():
@@ -503,6 +615,9 @@ def prepare_worktree(repo_dir: Path, worktree_dir: Path, *, branch: str) -> Path
     origin_repo = _origin_repo_slug(_git(["remote", "get-url", "origin"], worktree_dir))
     _gh(["repo", "set-default", origin_repo], worktree_dir)
     _install_origin_only_push_guard(worktree_dir)
+    if submission_mode == "local_commit":
+        _install_local_commit_safety(worktree_dir)
+        _remove_upstream_remote(worktree_dir)
     return worktree_dir
 
 
