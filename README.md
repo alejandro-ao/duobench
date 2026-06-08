@@ -172,11 +172,36 @@ uv run python scripts/run_phase.py --phase judge \
 
 # 4) aggregate → results.json  +  5) plot → results/*.png
 uv run python scripts/aggregate.py runs/$TS
-cp scripts/plots_example.py runs/$TS/plots.py && uv run python runs/$TS/plots.py runs/$TS
+uv run python scripts/plots_example.py runs/$TS    # run in place; copy to runs/$TS/plots.py to customize
 ```
 
 Long phase jobs are meant to run detached in `tmux`; see the `duobench` skill for
 the launch/gate/cap recipe the agent uses.
+
+### Benchmarking an issue from another repo (SWE-bench style)
+
+The implementer commits into a worktree of the **current directory**, so to
+benchmark an issue that lives in a *different* repo, run the phase jobs **from a
+clone of that repo** while importing duobench + configs from this one:
+
+```bash
+DUO=$PWD                                              # this repo
+TGT=~/repos/duobench-targets/flask-4041              # the target clone
+
+# clone at the PRE-FIX base (first parent of the fixing PR's merge commit)
+BASE=$(gh api repos/pallets/flask/commits/<merge_sha> -q '.parents[0].sha')
+git clone https://github.com/pallets/flask.git "$TGT" && git -C "$TGT" checkout "$BASE"
+git -C "$TGT" config extensions.worktreeConfig true  # REQUIRED, else implement jobs fail
+
+# launch every phase with cwd=clone, project=this repo, ABSOLUTE config paths
+cd "$TGT" && uv run --project "$DUO" python "$DUO/scripts/run_phase.py" --phase plan \
+  --models-config "$DUO/config/models.yaml" --conditions-config "$DUO/config/conditions.yaml" \
+  --run-dir "$DUO/runs/$TS" --out-dir "$DUO/runs/$TS/shared-plans/kimi-k2.6/trial-0" \
+  --issue https://github.com/pallets/flask/issues/4041 --planner kimi-k2.6 --trial 0
+```
+
+Keep the run dir, `results.json`, and plots under this repo (`$DUO/runs/$TS`). See
+`SKILL.md` §1.5 for the full recipe.
 
 ### `run_phase.py` flags
 
@@ -203,10 +228,18 @@ from `config/models.yaml` (`kimi-k2.6`, `gpt-5.5`) or a raw **Pi spec**
 (`kimi-coding/kimi-for-coding`, `openai-codex/gpt-5.5`), optionally with a
 `:thinking` suffix (`off|minimal|low|medium|high|xhigh`).
 
-Cost prefers Pi/provider-reported cost; otherwise it falls back to the model's
-`pricing` block in `config/models.yaml`, then `costs.yaml` (rates are $/MTok). If
-none is available, cost is recorded as `0` with source `unknown` and
-quality-per-dollar is meaningless — the aggregate leaderboard warns about this.
+Cost prefers Pi/provider-reported cost (`cost_source: pi_reported`); otherwise it
+falls back to the model's `pricing` block in `config/models.yaml`, then
+`costs.yaml` (rates are $/MTok, `cost_source: configured`). If none is available,
+cost is `0` with source `unknown` and quality-per-dollar is meaningless — the
+aggregate leaderboard warns about this.
+
+> ⚠️ **Set `cache_read` for any `configured`-priced model.** An agentic implement
+> loop is ~90% cache-read tokens; without a `cache_read` rate those hits are
+> billed at the **full input price**, inflating cost several-fold and making
+> efficiency comparisons against `pi_reported` models unfair. Add `cache_read`
+> (and `cache_write` if known) to keep cost correct at run time — no post-hoc
+> recompute needed.
 
 ```yaml
 # config/models.yaml
@@ -215,7 +248,7 @@ models:
     provider: kimi-coding
     model_id: kimi-for-coding
     thinking: high
-    pricing: { input: 0.95, output: 4.00 }
+    pricing: { input: 0.95, output: 4.00, cache_read: 0.16 }
 judges: [kimi-k2.6, gpt-5.5]
 ```
 
@@ -280,6 +313,9 @@ store. Pass `--no-pi-sessions` to disable.
   issues — no pushes, no PRs; everything stays under `runs/<timestamp>/`.
 - ✅ Start small: one condition, `--trial 0`, a test issue.
 - ✅ Keep the concurrency cap low (the skill defaults to 2 money-jobs at once).
+- ⚠️ One issue is an anecdote; multi-issue/multi-trial sweeps make it statistically
+  meaningful but cost scales as `issues × conditions × jobs × trials` — opt-in
+  only. See `SKILL.md` §8 before launching a sweep.
 - ⚠️ `--submission-mode pr` is the legacy PR-creating flow — only use it on a fork
   you control. See [issue #11](https://github.com/alejandro-ao/agent-synergy-eval/issues/11)
   for the safety rationale.
@@ -295,6 +331,8 @@ store. Pass `--no-pi-sessions` to disable.
 | Pi cannot find a model | Check `provider`/`model_id` in `config/models.yaml` match your Pi install. |
 | A job seems stuck | `tmux attach -t <job>` and `tail -f <out>/job.log`; its `result.json` appears when done. |
 | Plots fail to import seaborn | `uv sync` (seaborn + pandas are declared deps). |
+| Implement jobs all error with `--worktree cannot be used with multiple working trees` | The repo lacks worktree config (common on fresh clones): `git -C <repo> config extensions.worktreeConfig true`, then retry. |
+| Kimi/GPT look far more expensive than expected | They're `configured`-priced; add a `cache_read` rate (see Models & Costs). |
 
 ---
 
