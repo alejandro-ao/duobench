@@ -1,5 +1,10 @@
 from duobench.config import Model, Pricing
-from duobench.impl_phase import _detect_existing_pr_id, extract_commit_sha, run_impl_phase
+from duobench.impl_phase import (
+    _detect_existing_pr_id,
+    _resolve_commit_sha,
+    extract_commit_sha,
+    run_impl_phase,
+)
 from duobench.pi_rpc import PiRpcStalled, TurnResult, Usage
 
 
@@ -112,6 +117,42 @@ def test_extract_commit_sha_ignores_plain_completion_words():
     assert extract_commit_sha("committed") == ""
     assert extract_commit_sha("created commit") == ""
     assert extract_commit_sha("commit 1234567") == "1234567"
+
+
+def test_extract_commit_sha_prefers_full_sha_over_earlier_short_token():
+    """A stray short hex/decimal token (e.g. an issue number) must not win when a
+    real 40-char SHA appears later in the reply."""
+    full = "a" * 40
+    assert extract_commit_sha(f"closes 1234567, committed as {full}") == full
+
+
+def _init_repo_with_commit(repo):
+    import subprocess
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True, capture_output=True)
+    (repo / "f.txt").write_text("x\n")
+    subprocess.run(["git", "add", "f.txt"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-q", "-m", "c"], cwd=repo, check=True, capture_output=True)
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def test_resolve_commit_sha_falls_back_to_head_when_token_not_a_real_commit(tmp_path):
+    """A parsed token that doesn't resolve to a real commit must not become the
+    artifact; the reliable moved-HEAD detection wins instead (#11)."""
+    repo = tmp_path / "repo"
+    head = _init_repo_with_commit(repo)
+    # "1234567" is hex-shaped but not a real object in this repo.
+    assert _resolve_commit_sha(repo, "1234567", initial_head="") == head
+
+
+def test_resolve_commit_sha_normalizes_real_short_sha_to_full(tmp_path):
+    repo = tmp_path / "repo"
+    head = _init_repo_with_commit(repo)
+    assert _resolve_commit_sha(repo, head[:8], initial_head="") == head
 
 
 def test_impl_phase_infers_new_head_when_agent_says_committed(tmp_path, monkeypatch):

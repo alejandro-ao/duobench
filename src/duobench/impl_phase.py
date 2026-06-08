@@ -79,17 +79,23 @@ def extract_pr_id(text: str) -> str:
 
 
 def extract_commit_sha(text: str) -> str:
-    """Pull the first plausible commit SHA out of an implementer response.
+    """Pull the most plausible commit SHA out of an implementer response.
 
-    Accepts both full (40-char) and short (7+ char) hex SHAs. Skips anything inside
-    longer hex strings to avoid grabbing hash fragments that aren't real SHAs.
+    A full 40-char SHA anywhere in the text wins; otherwise the first short
+    (7-39 char) hex token is returned as a fallback. Preferring the full SHA
+    avoids latching onto an earlier short hex-looking token (e.g. a 7-digit
+    issue number or timestamp) when the real SHA appears later in the reply.
+    The parsed token is still validated against the repo by the caller (see
+    ``_resolve_commit_sha``), so a non-SHA match cannot become the artifact.
     """
+    short = ""
     for match in _HEX_RE.finditer(text):
         candidate = match.group(1)
-        # Prefer full-length SHAs; allow 7+ chars as a fallback.
-        if len(candidate) == 40 or len(candidate) >= 7:
+        if len(candidate) == 40:
             return candidate
-    return ""
+        if not short:
+            short = candidate
+    return short
 
 
 def _looks_pr_done(text: str) -> bool:
@@ -119,6 +125,25 @@ def _detect_current_commit_sha(build_dir: Path, initial_head: str = "") -> str:
     if not head or (initial_head and head == initial_head):
         return ""
     return head
+
+
+def _resolve_commit_sha(build_dir: Path, candidate: str, initial_head: str) -> str:
+    """Confirm a parsed SHA against the repo, else fall back to a moved HEAD.
+
+    ``candidate`` comes from :func:`extract_commit_sha`, which can match a stray
+    hex-looking token (a 7+ digit issue number, a timestamp). We trust it only
+    when it resolves to a real commit object, normalizing to the canonical
+    40-char SHA. Otherwise we fall back to HEAD when the implementer actually
+    advanced it past ``initial_head`` — so a mis-parse can no longer shadow the
+    reliable HEAD detection (#11). Returns "" when nothing real is found.
+    """
+    if candidate:
+        resolved = _git_stdout(
+            ["rev-parse", "--verify", "--quiet", f"{candidate}^{{commit}}"], build_dir
+        )
+        if resolved:
+            return resolved
+    return _detect_current_commit_sha(build_dir, initial_head)
 
 
 def _detect_existing_pr_id(build_dir: Path) -> str:
@@ -254,7 +279,7 @@ def run_impl_phase(
                 ui.add_turn_result(result.usage, turn_cost.usd, turn_cost.reported_usd)
             final_text = result.text
             if submission_mode == "local_commit":
-                commit_sha = extract_commit_sha(result.text) or _detect_current_commit_sha(build_dir, initial_head)
+                commit_sha = _resolve_commit_sha(build_dir, extract_commit_sha(result.text), initial_head)
             else:
                 pr_id = extract_pr_id(result.text)
                 if not pr_id and not looks_done(result.text):
@@ -288,9 +313,8 @@ def run_impl_phase(
                     final_text = result.text
                     if submission_mode == "local_commit":
                         commit_sha = (
-                            extract_commit_sha(result.text)
+                            _resolve_commit_sha(build_dir, extract_commit_sha(result.text), initial_head)
                             or commit_sha
-                            or _detect_current_commit_sha(build_dir, initial_head)
                         )
                     else:
                         pr_id = extract_pr_id(result.text) or pr_id
