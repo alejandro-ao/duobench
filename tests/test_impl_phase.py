@@ -44,7 +44,9 @@ def test_impl_phase_retries_stalled_follow_up_as_prompt(tmp_path, monkeypatch):
     _FakeSession.follow_up_results = [PiRpcStalled("no agent_start after queued turn")]
     monkeypatch.setattr(impl_mod, "PiSession", _FakeSession)
 
-    result = run_impl_phase(_model(), "{plan}", "plan", tmp_path / "build", timeout=30)
+    result = run_impl_phase(
+        _model(), "{plan}", "plan", tmp_path / "build", timeout=30, submission_mode="pr"
+    )
 
     assert result.status == "complete"
     assert result.pr_id == "123"
@@ -62,7 +64,9 @@ def test_impl_phase_records_stalled_status_after_retry_stalls(tmp_path, monkeypa
     _FakeSession.follow_up_results = [PiRpcStalled("no agent_start after queued turn")]
     monkeypatch.setattr(impl_mod, "PiSession", _FakeSession)
 
-    result = run_impl_phase(_model(), "{plan}", "plan", tmp_path / "build", timeout=30)
+    result = run_impl_phase(
+        _model(), "{plan}", "plan", tmp_path / "build", timeout=30, submission_mode="pr"
+    )
 
     assert result.status == "stalled"
     assert result.turns == 1
