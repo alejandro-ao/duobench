@@ -157,6 +157,13 @@ def test_judge_sentinel_goes_under_results(tmp_path, patched, monkeypatch):
 def test_assemble_results_folds_judges_into_results(tmp_path):
     from duobench.engine import assemble_results
 
+    (tmp_path / "run_state.json").write_text(json.dumps({
+        "issue": "https://github.com/example/repo/issues/123",
+        "issue_created_at": "2026-05-20T12:00:00Z",
+        "base_commit_sha": "abc123",
+        "fix_commit_sha": "def456",
+    }))
+
     # one condition, one trial, two judge sentinels
     td = tmp_path / "conditions" / "kimi-solo" / "trial-0"
     td.mkdir(parents=True)
@@ -178,6 +185,9 @@ def test_assemble_results_folds_judges_into_results(tmp_path):
     cond = results["conditions"]["kimi-solo"]
     assert cond["dimensions"]["task_completion"] == 7.0  # mean of 8 and 6
     assert set(results["self_bias"]) == {"kimi", "gpt"}
+    assert results["run"]["issue_created_at"] == "2026-05-20T12:00:00Z"
+    assert results["run"]["base_commit_sha"] == "abc123"
+    assert results["run"]["fix_commit_sha"] == "def456"
     # scores written back into trial.json
     trial = _read(td / "trial.json")
     assert len(trial["judge_scores"]) == 2

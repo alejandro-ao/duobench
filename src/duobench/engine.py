@@ -903,6 +903,22 @@ def _collect_trial_scores(trial_dir: Path, judges: list[str] | None) -> list[Jud
     return scores
 
 
+def _run_metadata(run_dir: Path) -> dict:
+    """Best-effort run metadata copied from the agent-authored run_state.json."""
+    state = _read_json(run_dir / "run_state.json")
+    keys = (
+        "issue",
+        "issue_created_at",
+        "issue_selected_at",
+        "base_commit_sha",
+        "fix_commit_sha",
+        "fix_pr_url",
+        "target_repo",
+        "target_repo_dir",
+    )
+    return {k: state[k] for k in keys if state.get(k)}
+
+
 def assemble_results(run_dir: Path, judges: list[str] | None = None) -> dict:
     """Fold every conditions/*/trial-*/trial.json into results.json (no model calls).
 
@@ -934,5 +950,8 @@ def assemble_results(run_dir: Path, judges: list[str] | None = None) -> dict:
 
     judge_list = list(judges) if judges else discovered_judges
     results = aggregate(records, judge_list)
+    meta = _run_metadata(run_dir)
+    if meta:
+        results["run"] = meta
     _write_json_atomic(run_dir / "results.json", results)
     return results

@@ -49,12 +49,12 @@ class TrialRecord:
     impl_duration_s: float = 0.0
 
 
-def _mean(xs: list[float]) -> float:
-    return round(statistics.fmean(xs), 4) if xs else 0.0
+def _mean(xs: list[float], digits: int = 2) -> float:
+    return round(statistics.fmean(xs), digits) if xs else 0.0
 
 
-def _std(xs: list[float]) -> float:
-    return round(statistics.pstdev(xs), 4) if len(xs) > 1 else 0.0
+def _std(xs: list[float], digits: int = 2) -> float:
+    return round(statistics.pstdev(xs), digits) if len(xs) > 1 else 0.0
 
 
 def _majority_source(records: list[TrialRecord]) -> str:
@@ -83,7 +83,7 @@ def aggregate(records: list[TrialRecord], judges: list[str]) -> dict:
         costs = [t.cost_usd for t in trs]
         durations = [t.plan_duration_s + t.impl_duration_s for t in trs]
         quality = _mean(qualities)
-        cost_usd = _mean(costs)
+        cost_usd = _mean(costs, 4)
         conditions[cid] = {
             "planner": trs[0].planner,
             "implementer": trs[0].implementer,
@@ -92,8 +92,8 @@ def aggregate(records: list[TrialRecord], judges: list[str]) -> dict:
             "quality": quality,
             "quality_std": _std(qualities),
             "cost_usd": cost_usd,
-            "cost_std": _std(costs),
-            "cost_efficiency": round(quality / cost_usd, 4) if cost_usd > 0 else 0.0,
+            "cost_std": _std(costs, 4),
+            "cost_efficiency": round(quality / cost_usd, 1) if cost_usd > 0 else 0.0,
             "trials": len(trs),
             "impl_statuses": [t.impl_status for t in trs],
             "cost_source": _majority_source(trs),
