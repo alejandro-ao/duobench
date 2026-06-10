@@ -50,10 +50,12 @@ def test_prepare_worktree_sets_origin_default_and_push_guard(tmp_path, monkeypat
     prepare_worktree(repo_dir, worktree_dir, branch="duobench-test")
 
     assert gh_calls == [(["repo", "set-default", "alejandro-ao/mellea"], worktree_dir)]
-    assert (["config", "--worktree", "core.hooksPath", ".git-hooks"], worktree_dir) in git_calls
+    hooks_dir = worktree_dir.parent / ".duobench-harness" / "hooks"
+    assert (["config", "--worktree", "core.hooksPath", str(hooks_dir)], worktree_dir) in git_calls
 
-    hook = worktree_dir / ".git-hooks" / "pre-push"
+    hook = hooks_dir / "pre-push"
     assert hook.exists()
     assert hook.stat().st_mode & 0o111
     assert 'remote_name="$1"' in hook.read_text()
     assert '[ "$remote_name" != "origin" ]' in hook.read_text()
+    assert not (worktree_dir / ".git-hooks").exists()

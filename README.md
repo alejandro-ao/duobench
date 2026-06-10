@@ -286,7 +286,8 @@ plots.py                             # the run's plotting script (copied + adapt
 shared-plans/<planner>/trial-<n>/
   plan.md  shared-plan.json  planner-transcript.json  result.json
 conditions/<cond-id>/trial-<n>/
-  worktree/                          # isolated git worktree (+ .duobench-bin safety shims)
+  worktree/                          # isolated git worktree for the candidate fix
+  .duobench-harness/                 # safety shims/hooks kept outside the candidate fix
   plan.md  commit.json  verify.json  trial.json
   implementer-transcript.json
   judge-transcripts/<judge>.json

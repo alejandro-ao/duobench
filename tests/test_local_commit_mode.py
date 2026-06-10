@@ -10,7 +10,7 @@ upstream repository. These tests pin down the safety scaffolding:
   diff, and worktree state instead of a PR id.
 * `prepare_worktree` installs PATH-prepended `git`/`gh` wrapper scripts
   that reject `git push` and `gh pr create|edit|merge|...` in the
-  implementer session.
+  implementer session, outside the solution worktree.
 * The same wrappers allow read-only commands (e.g. `git status`,
   `gh issue view`, `gh pr view`).
 * The `upstream` git remote is removed from the worktree in local-commit
@@ -98,8 +98,8 @@ def test_local_commit_judge_prompt_evaluates_commit_not_pr():
 
 
 def test_prepare_worktree_installs_safety_wrappers_in_local_commit_mode(tmp_path, monkeypatch):
-    """In local-commit mode, prepare_worktree must install a worktree-local bin/
-    with PATH-prepended git/gh wrappers that block push and PR creation."""
+    """In local-commit mode, prepare_worktree must install PATH-prepended git/gh
+    wrappers outside the solution worktree so they cannot contaminate commits."""
     import duobench.engine as run_mod
 
     repo_dir = tmp_path / "repo"
@@ -125,8 +125,10 @@ def test_prepare_worktree_installs_safety_wrappers_in_local_commit_mode(tmp_path
 
     prepare_worktree(repo_dir, worktree_dir, branch="duobench-test", submission_mode="local_commit")
 
-    bin_dir = worktree_dir / ".duobench-bin"
+    bin_dir = worktree_dir.parent / ".duobench-harness" / "bin"
     assert bin_dir.is_dir()
+    assert not (worktree_dir / ".duobench-bin").exists()
+    assert not (worktree_dir / ".git-hooks").exists()
     git_wrapper = bin_dir / "git"
     gh_wrapper = bin_dir / "gh"
     assert git_wrapper.is_file()
@@ -175,14 +177,15 @@ def test_prepare_worktree_does_not_install_wrappers_in_pr_mode(tmp_path, monkeyp
 
     prepare_worktree(repo_dir, worktree_dir, branch="duobench-test", submission_mode="pr")
 
-    assert not (worktree_dir / ".duobench-bin").exists()
+    assert not (worktree_dir.parent / ".duobench-harness" / "bin").exists()
     # No 'remote remove upstream' call in PR mode.
     assert (["remote", "remove", "upstream"], worktree_dir) not in git_calls
 
 
 def test_install_local_commit_safety_creates_executable_wrappers(tmp_path):
     bin_dir = _install_local_commit_safety(tmp_path)
-    assert bin_dir == tmp_path / ".duobench-bin"
+    assert bin_dir == tmp_path.parent / ".duobench-harness" / "bin"
+    assert not (tmp_path / ".duobench-bin").exists()
     for name in ("git", "gh"):
         path = bin_dir / name
         assert path.is_file()
@@ -222,11 +225,11 @@ def test_git_wrapper_blocks_push(tmp_path):
     if shutil.which("git") is None:
         pytest.skip("git not on PATH; cannot exercise wrapper behavior")
     _install_local_commit_safety(tmp_path)
-    bin_dir = str(tmp_path / ".duobench-bin")
+    bin_dir = str(tmp_path.parent / ".duobench-harness" / "bin")
 
     # The wrapper is implemented as /bin/sh, so we can run it on any POSIX system.
     push = subprocess.run(
-        [str(tmp_path / ".duobench-bin" / "git"), "push", "origin", "main"],
+        [str(tmp_path.parent / ".duobench-harness" / "bin" / "git"), "push", "origin", "main"],
         env={"PATH": bin_dir, "HOME": str(tmp_path), "DUOBENCH_BLOCK_GIT_PUSH": "1"},
         capture_output=True,
         text=True,
@@ -242,7 +245,7 @@ def test_git_wrapper_allows_status_and_other_commands(tmp_path):
     if shutil.which("git") is None:
         pytest.skip("git not on PATH; cannot exercise wrapper behavior")
     _install_local_commit_safety(tmp_path)
-    bin_dir = str(tmp_path / ".duobench-bin")
+    bin_dir = str(tmp_path.parent / ".duobench-harness" / "bin")
 
     # Initialize a tiny repo so `git status` succeeds.
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, capture_output=True)
@@ -250,7 +253,7 @@ def test_git_wrapper_allows_status_and_other_commands(tmp_path):
     subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True, capture_output=True)
 
     status = subprocess.run(
-        [str(tmp_path / ".duobench-bin" / "git"), "status"],
+        [str(tmp_path.parent / ".duobench-harness" / "bin" / "git"), "status"],
         env={"PATH": bin_dir, "HOME": str(tmp_path), "DUOBENCH_BLOCK_GIT_PUSH": "1"},
         capture_output=True,
         text=True,
@@ -265,10 +268,10 @@ def test_gh_wrapper_blocks_pr_create(tmp_path):
     if shutil.which("gh") is None:
         pytest.skip("gh not on PATH; cannot exercise wrapper behavior")
     _install_local_commit_safety(tmp_path)
-    bin_dir = str(tmp_path / ".duobench-bin")
+    bin_dir = str(tmp_path.parent / ".duobench-harness" / "bin")
 
     res = subprocess.run(
-        [str(tmp_path / ".duobench-bin" / "gh"), "pr", "create", "--title", "x"],
+        [str(tmp_path.parent / ".duobench-harness" / "bin" / "gh"), "pr", "create", "--title", "x"],
         env={"PATH": bin_dir, "HOME": str(tmp_path), "DUOBENCH_BLOCK_GH_PR": "1"},
         capture_output=True,
         text=True,
@@ -284,11 +287,11 @@ def test_gh_wrapper_blocks_other_pr_mutations(tmp_path):
     if shutil.which("gh") is None:
         pytest.skip("gh not on PATH; cannot exercise wrapper behavior")
     _install_local_commit_safety(tmp_path)
-    bin_dir = str(tmp_path / ".duobench-bin")
+    bin_dir = str(tmp_path.parent / ".duobench-harness" / "bin")
 
     for verb in ("edit", "merge", "close", "review", "delete-branch"):
         res = subprocess.run(
-            [str(tmp_path / ".duobench-bin" / "gh"), "pr", verb, "1"],
+            [str(tmp_path.parent / ".duobench-harness" / "bin" / "gh"), "pr", verb, "1"],
             env={"PATH": bin_dir, "HOME": str(tmp_path), "DUOBENCH_BLOCK_GH_PR": "1"},
             capture_output=True,
             text=True,
@@ -303,14 +306,14 @@ def test_gh_wrapper_allows_read_only_issue_and_pr_view(tmp_path):
     if shutil.which("gh") is None:
         pytest.skip("gh not on PATH; cannot exercise wrapper behavior")
     _install_local_commit_safety(tmp_path)
-    bin_dir = str(tmp_path / ".duobench-bin")
+    bin_dir = str(tmp_path.parent / ".duobench-harness" / "bin")
 
     # `gh issue view --help` should succeed (or fail with the real gh help
     # message, not the wrapper's block message). We assert the block message
     # is absent.
     for args in (["issue", "view", "--help"], ["pr", "view", "--help"]):
         res = subprocess.run(
-            [str(tmp_path / ".duobench-bin" / "gh"), *args],
+            [str(tmp_path.parent / ".duobench-harness" / "bin" / "gh"), *args],
             env={"PATH": bin_dir, "HOME": str(tmp_path), "DUOBENCH_BLOCK_GH_PR": "1"},
             capture_output=True,
             text=True,
@@ -327,18 +330,18 @@ def test_git_and_gh_wrappers_can_be_disabled_via_env(tmp_path):
     if shutil.which("gh") is None or shutil.which("git") is None:
         pytest.skip("git/gh not on PATH; cannot exercise wrapper behavior")
     _install_local_commit_safety(tmp_path)
-    bin_dir = str(tmp_path / ".duobench-bin")
+    bin_dir = str(tmp_path.parent / ".duobench-harness" / "bin")
     env = {"PATH": bin_dir, "HOME": str(tmp_path),
            "DUOBENCH_BLOCK_GIT_PUSH": "0", "DUOBENCH_BLOCK_GH_PR": "0"}
     # Both should reach the real binary; we only assert that the wrapper's
     # block message is absent.
     push = subprocess.run(
-        [str(tmp_path / ".duobench-bin" / "git"), "status"],
+        [str(tmp_path.parent / ".duobench-harness" / "bin" / "git"), "status"],
         env=env, capture_output=True, text=True,
     )
     assert "disabled" not in (push.stdout + push.stderr).lower()
     gh = subprocess.run(
-        [str(tmp_path / ".duobench-bin" / "gh"), "issue", "view", "--help"],
+        [str(tmp_path.parent / ".duobench-harness" / "bin" / "gh"), "issue", "view", "--help"],
         env=env, capture_output=True, text=True,
     )
     assert "disabled" not in (gh.stdout + gh.stderr).lower()

@@ -294,8 +294,13 @@ def _origin_repo_slug(remote_url: str) -> str:
     raise ConfigError(f"could not infer GitHub repository from origin remote: {remote_url}")
 
 
-def _install_origin_only_push_guard(worktree_dir: Path) -> None:
-    hooks_dir = worktree_dir / ".git-hooks"
+def _harness_dir_for(worktree_dir: Path) -> Path:
+    """Return the per-trial harness directory outside the solution worktree."""
+    return worktree_dir.parent / ".duobench-harness"
+
+
+def _install_origin_only_push_guard(worktree_dir: Path) -> Path:
+    hooks_dir = _harness_dir_for(worktree_dir) / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
     hook = hooks_dir / "pre-push"
     hook.write_text(
@@ -311,10 +316,11 @@ fi
         encoding="utf-8",
     )
     hook.chmod(0o755)
-    _git(["config", "--worktree", "core.hooksPath", ".git-hooks"], worktree_dir)
+    _git(["config", "--worktree", "core.hooksPath", str(hooks_dir)], worktree_dir)
+    return hooks_dir
 
 
-# PATH-prepended wrappers installed in the implementer worktree. They take
+# PATH-prepended wrappers installed outside the implementer worktree. They take
 # precedence over system git/gh for bare command names; the agent could still
 # call absolute paths, so they are defense-in-depth alongside prompt guidance
 # and the upstream-remote removal below, not a hard sandbox.
@@ -379,12 +385,14 @@ exec "__DUOBENCH_REAL_GH__" "$@"
 
 
 def _install_local_commit_safety(worktree_dir: Path) -> Path:
-    """Install a worktree-local bin/ with `git`/`gh` wrappers blocking external mutations.
+    """Install per-trial `git`/`gh` wrappers outside the solution worktree.
 
     Returns the bin directory path; the harness prepends it to PATH for the
-    implementer Pi subprocess.
+    implementer Pi subprocess. Keeping these files outside ``worktree_dir``
+    prevents benchmark infrastructure from being accidentally committed and
+    judged as part of the candidate solution.
     """
-    bin_dir = worktree_dir / ".duobench-bin"
+    bin_dir = _harness_dir_for(worktree_dir) / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     git_bin = shutil.which("git") or "git"
     gh_bin = shutil.which("gh") or "gh"
@@ -416,9 +424,10 @@ def prepare_worktree(
 ) -> Path:
     """Create an isolated git worktree for one implementer trial.
 
-    In ``local_commit`` mode this installs the PATH-prepended git/gh safety
-    wrappers, removes the ``upstream`` remote, and keeps the origin-only
-    pre-push hook. In ``pr`` mode only the pre-push hook is installed.
+    In ``local_commit`` mode this installs PATH-prepended git/gh safety
+    wrappers outside the worktree, removes the ``upstream`` remote, and keeps
+    the origin-only pre-push hook outside the worktree. In ``pr`` mode only the
+    pre-push hook is installed.
     """
     _git(["rev-parse", "--show-toplevel"], repo_dir)
     worktree_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -657,7 +666,7 @@ def implement_one(
     build_dir = out_dir / "worktree"
     branch = _safe_path_part(f"duobench/{run_label}/{condition_id}/trial-{trial}")
     worktree_dir = prepare_worktree(repo_dir, build_dir, branch=branch, submission_mode=submission_mode)
-    local_bin_dir = worktree_dir / ".duobench-bin"
+    local_bin_dir = _harness_dir_for(worktree_dir) / "bin"
     extra_path = local_bin_dir if local_bin_dir.is_dir() else None
 
     impl = run_impl_phase(
