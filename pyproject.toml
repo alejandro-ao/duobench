@@ -26,9 +26,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/alejandro-ao/agent-synergy-eval"
-Repository = "https://github.com/alejandro-ao/agent-synergy-eval"
-Issues = "https://github.com/alejandro-ao/agent-synergy-eval/issues"
+Homepage = "https://github.com/alejandro-ao/duobench"
+Repository = "https://github.com/alejandro-ao/duobench"
+Issues = "https://github.com/alejandro-ao/duobench/issues"
 
 [build-system]
 requires = ["hatchling"]

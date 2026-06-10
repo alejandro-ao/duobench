@@ -12,7 +12,7 @@
 <h3>Benchmark planner × implementer AI coding-agent duos on real GitHub issues — orchestrated by an agent, charted as quality-per-dollar</h3>
 
 <p>
-  <a href="https://github.com/alejandro-ao/agent-synergy-eval/blob/main/LICENSE">
+  <a href="https://github.com/alejandro-ao/duobench/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT">
   </a>
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
@@ -318,7 +318,7 @@ store. Pass `--no-pi-sessions` to disable.
   meaningful but cost scales as `issues × conditions × jobs × trials` — opt-in
   only. See `SKILL.md` §8 before launching a sweep.
 - ⚠️ `--submission-mode pr` is the legacy PR-creating flow — only use it on a fork
-  you control. See [issue #11](https://github.com/alejandro-ao/agent-synergy-eval/issues/11)
+  you control. See [issue #11](https://github.com/alejandro-ao/duobench/issues/11)
   for the safety rationale.
 
 ---

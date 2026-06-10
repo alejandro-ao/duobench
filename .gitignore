@@ -1,5 +1,11 @@
 # Generated run artifacts (raw builds, screenshots, browser binaries)
 runs/
+results/
+
+# Agent session logs / fast-agent config
+sessions/
+.fast-agent/
+fast-agent-log.jsonl
 
 # Python
 __pycache__/
