@@ -70,7 +70,8 @@ implementer only ever makes a local commit:
    quality-per-dollar.
 
 > ℹ️ **No external side effects by default.** Every artifact stays in your local
-> worktree under `runs/<timestamp>/`. The legacy PR-creating flow is opt-in via
+> worktree under your chosen output dir (default `./duobench-runs/<timestamp>/`).
+> The legacy PR-creating flow is opt-in via
 > `--submission-mode pr` and is unsafe against public upstream issues.
 
 ---
@@ -115,7 +116,8 @@ installed, the `duobench` skill triggers on phrases like:
 - *"add gpt planner and kimi implementer to the eval and produce the plots too"*
 
 The agent will: confirm the GitHub issue + the model matrix + the estimated job
-count, create a `runs/<timestamp>/` dir, launch the plan → implement → judge
+count, announce the output dir (default `./duobench-runs/<timestamp>/`), launch
+the plan → implement → judge
 phase jobs in `tmux` (gating each phase on completion), aggregate, and write +
 run a seaborn plotting script, then show you the charts.
 
@@ -124,7 +126,7 @@ You can watch any job live:
 ```bash
 tmux ls                                  # list duobench jobs
 tmux attach -t <job>                     # watch one (detach with Ctrl-b then d)
-tail -f runs/<ts>/conditions/<cond>/trial-0/job.log
+tail -f <run-dir>/conditions/<cond>/trial-0/job.log
 ```
 
 ---
@@ -133,7 +135,7 @@ tail -f runs/<ts>/conditions/<cond>/trial-0/job.log
 
 A **condition** is one planner×implementer pairing, identified by
 `<planner>-x-<implementer>` (or `<planner>-solo` when they're equal). Each phase
-is one Pi RPC instance run by `scripts/run_phase.py`, which writes a
+is one Pi RPC instance run by the skill's `scripts/run_phase.py`, which writes a
 `result.json` sentinel as its last action — the agent polls for that file to know
 a job is done.
 
@@ -159,29 +161,30 @@ target repo (the engine worktrees the current directory):
 
 ```bash
 SKILL_DIR=<path to the installed skill>   # in this repo: $PWD/skills/duobench
+RUNS=$PWD/duobench-runs                   # output dir (anywhere you like)
 TS=$(date -u +%Y-%m-%dT%H-%M-%S); ISSUE=https://github.com/org/repo/issues/123
 
 # 1) plan (one per unique planner)
 uv run "$SKILL_DIR/scripts/run_phase.py" --phase plan \
-  --run-dir runs/$TS --out-dir runs/$TS/shared-plans/kimi-k2.6/trial-0 \
+  --run-dir $RUNS/$TS --out-dir $RUNS/$TS/shared-plans/kimi-k2.6/trial-0 \
   --issue $ISSUE --planner kimi-k2.6 --trial 0
 
 # 2) implement (one per condition) — points at that planner's plan.md
 uv run "$SKILL_DIR/scripts/run_phase.py" --phase implement \
-  --run-dir runs/$TS --out-dir runs/$TS/conditions/kimi-k2.6-solo/trial-0 \
+  --run-dir $RUNS/$TS --out-dir $RUNS/$TS/conditions/kimi-k2.6-solo/trial-0 \
   --issue $ISSUE --condition kimi-k2.6-solo \
   --planner kimi-k2.6 --implementer kimi-k2.6 \
-  --plan-path runs/$TS/shared-plans/kimi-k2.6/trial-0/plan.md --trial 0
+  --plan-path $RUNS/$TS/shared-plans/kimi-k2.6/trial-0/plan.md --trial 0
 
 # 3) judge (one per condition × judge) — commit SHA from the implement result.json
 uv run "$SKILL_DIR/scripts/run_phase.py" --phase judge \
-  --run-dir runs/$TS --out-dir runs/$TS/conditions/kimi-k2.6-solo/trial-0 \
+  --run-dir $RUNS/$TS --out-dir $RUNS/$TS/conditions/kimi-k2.6-solo/trial-0 \
   --issue $ISSUE --condition kimi-k2.6-solo --judge-key gpt-5.5 \
-  --build-dir runs/$TS/conditions/kimi-k2.6-solo/trial-0/worktree --commit-sha <SHA> --trial 0
+  --build-dir $RUNS/$TS/conditions/kimi-k2.6-solo/trial-0/worktree --commit-sha <SHA> --trial 0
 
 # 4) aggregate → results.json  +  5) plot → results/*.png
-uv run "$SKILL_DIR/scripts/aggregate.py" runs/$TS
-uv run "$SKILL_DIR/scripts/plots_example.py" runs/$TS    # run in place; copy to runs/$TS/plots.py to customize
+uv run "$SKILL_DIR/scripts/aggregate.py" $RUNS/$TS
+uv run "$SKILL_DIR/scripts/plots_example.py" $RUNS/$TS    # run in place; copy to $RUNS/$TS/plots.py to customize
 ```
 
 Long phase jobs are meant to run detached in `tmux`; see the `duobench` skill for
@@ -278,7 +281,7 @@ a model matrix directly instead.
 
 ## Output
 
-Each run writes to `runs/<timestamp>/`:
+Each run writes to its run dir (default `./duobench-runs/<timestamp>/`):
 
 ```text
 run_state.json                       # orchestration state (agent-owned; enables resume)
@@ -318,7 +321,7 @@ store. Pass `--no-pi-sessions` to disable.
 ## Safety Tips
 
 - ✅ Default mode (`--submission-mode local_commit`) is safe for public upstream
-  issues — no pushes, no PRs; everything stays under `runs/<timestamp>/`.
+  issues — no pushes, no PRs; everything stays under the run dir.
 - ✅ Start small: one condition, `--trial 0`, a test issue.
 - ✅ Keep the concurrency cap low (the skill defaults to 2 money-jobs at once).
 - ⚠️ One issue is an anecdote; multi-issue/multi-trial sweeps make it statistically
@@ -347,7 +350,7 @@ store. Pass `--no-pi-sessions` to disable.
 ## Design
 
 - [`DESIGN.md`](DESIGN.md) — design rationale
-- `.claude/skills/duobench/SKILL.md` — the agent orchestration contract
+- [`skills/duobench/SKILL.md`](skills/duobench/SKILL.md) — the agent orchestration contract
 
 ---
 
