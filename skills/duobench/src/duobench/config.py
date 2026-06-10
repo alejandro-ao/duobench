@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from importlib import resources
 from pathlib import Path
 
 import yaml
+
+# The installed skill directory (skills/duobench/). Configs and prompts ship
+# inside it, so defaults resolve here — never against the caller's cwd, which
+# is the benchmark target repo.
+SKILL_ROOT = Path(__file__).resolve().parents[2]
 
 
 class ConfigError(Exception):
@@ -94,13 +98,13 @@ def _require(cond: bool, msg: str) -> None:
         raise ConfigError(msg)
 
 
-def _read_config_text(path: str | Path, default_name: str) -> str:
-    """Read a config path, falling back to packaged defaults for CLI defaults."""
+def _read_config_text(path: str | Path | None, default_name: str) -> str:
+    """Read an explicit config path, or the skill's bundled config when omitted."""
+    if path is None:
+        path = SKILL_ROOT / "config" / default_name
     path = Path(path)
     if path.is_file():
         return path.read_text()
-    if path.as_posix() == f"config/{default_name}":
-        return (resources.files("duobench.defaults.config") / default_name).read_text()
     raise ConfigError(f"config not found: {path}")
 
 
@@ -125,14 +129,14 @@ def load_costs(costs_path: str | Path = "costs.yaml") -> dict[str, Pricing]:
 
 
 def load_config(
-    models_path: str | Path = "config/models.yaml",
-    conditions_path: str | Path = "config/conditions.yaml",
+    models_path: str | Path | None = None,
+    conditions_path: str | Path | None = None,
     costs_path: str | Path = "costs.yaml",
 ) -> Config:
     """Load and validate both config files. Fails fast with a clear error.
 
-    Default CLI paths first use files in the current working directory. If they do not
-    exist, duobench falls back to config files packaged inside the installed tool.
+    When a path is omitted, the config bundled with the skill (under
+    ``SKILL_ROOT/config/``) is used — the caller's cwd is never consulted.
     """
     models_raw = yaml.safe_load(_read_config_text(models_path, "models.yaml")) or {}
     conditions_raw = yaml.safe_load(_read_config_text(conditions_path, "conditions.yaml")) or {}

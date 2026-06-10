@@ -1,6 +1,11 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+# ]
+# ///
 """Render a Claude Code session .jsonl transcript into readable Markdown.
 
-    uv run python scripts/export_session.py <session.jsonl> <out.md>
+    uv run "$SKILL_DIR"/scripts/export_session.py <session.jsonl> <out.md>
 
 Best-effort: walks the transcript, emitting user prompts, assistant text,
 tool calls (name + compact input), and tool results (truncated).

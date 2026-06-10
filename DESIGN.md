@@ -1,5 +1,10 @@
 # duobench — Design
 
+> **Historical note:** this is the original design document. The implementation has
+> since evolved (no monolithic CLI; everything ships inside the self-contained
+> skill at `skills/duobench/`). For current behavior, `skills/duobench/SKILL.md`
+> and the README are authoritative.
+
 A reproducible, **model-agnostic** benchmark that measures the quality and cost of
 **planner → implementer** agent pairings, to find the best cost/quality trade-off for
 AI-assisted coding.

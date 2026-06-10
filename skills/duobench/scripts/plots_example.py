@@ -1,7 +1,16 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "matplotlib>=3.9",
+#     "numpy>=1.26",
+#     "pandas>=2.0",
+#     "seaborn>=0.13",
+# ]
+# ///
 """Seed duobench plots — run in place OR copy to runs/<ts>/plots.py and adapt.
 
 Two ways to run (both work — the import below self-locates `plot_styles`):
-    uv run python scripts/plots_example.py runs/<ts>          # in place
+    uv run "$SKILL_DIR"/scripts/plots_example.py runs/<ts>          # in place
     cp scripts/plots_example.py runs/<ts>/plots.py && uv run python runs/<ts>/plots.py runs/<ts>
 
 The helpers in ``plot_styles`` return tidy DataFrames with dimension names read

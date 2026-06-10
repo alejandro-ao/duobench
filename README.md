@@ -90,20 +90,26 @@ gh auth status && pi --version && git status && tmux -V
 
 ## Installation
 
+Install the skill into any project (it is fully self-contained — engine,
+scripts, prompts, and configs all live inside the skill directory):
+
 ```bash
-uv sync
+npx skills add alejandro-ao/duobench
 ```
 
-That's it — no browser/Playwright dependency. The phase scripts run via
-`uv run python scripts/...`.
+Then ask your agent to run a benchmark (see Quick Start). Working on duobench
+itself? Clone this repo and `uv sync` — the skill is at `skills/duobench/` and
+`.claude/skills` symlinks to it.
 
 ---
 
 ## Quick Start
 
-The intended way to run duobench is to **ask the agent**. In Claude Code, from
-this repo, the `duobench` skill (`.claude/skills/duobench/SKILL.md`) triggers on
-phrases like:
+The intended way to run duobench is to **ask the agent**. With the skill
+installed, the `duobench` skill triggers on phrases like:
+
+- *"benchmark the quality:cost ratio of kimi planning and gpt 5.5 implementing
+  (and vice versa) on issue #123 of this repo"*
 
 - *"benchmark opus and kimi on duobench and produce plots about the results"*
 - *"add gpt planner and kimi implementer to the eval and produce the plots too"*
@@ -147,32 +153,35 @@ whole run dir (old + new merge automatically).
 
 ## Using the Scripts Directly
 
-You don't need the agent — the scripts are plain `uv run` commands.
+You don't need the agent — each script carries PEP 723 inline dependencies, so
+`uv run <script>` works with no project setup. Run them from a clone of the
+target repo (the engine worktrees the current directory):
 
 ```bash
+SKILL_DIR=<path to the installed skill>   # in this repo: $PWD/skills/duobench
 TS=$(date -u +%Y-%m-%dT%H-%M-%S); ISSUE=https://github.com/org/repo/issues/123
 
 # 1) plan (one per unique planner)
-uv run python scripts/run_phase.py --phase plan \
+uv run "$SKILL_DIR/scripts/run_phase.py" --phase plan \
   --run-dir runs/$TS --out-dir runs/$TS/shared-plans/kimi-k2.6/trial-0 \
   --issue $ISSUE --planner kimi-k2.6 --trial 0
 
 # 2) implement (one per condition) — points at that planner's plan.md
-uv run python scripts/run_phase.py --phase implement \
+uv run "$SKILL_DIR/scripts/run_phase.py" --phase implement \
   --run-dir runs/$TS --out-dir runs/$TS/conditions/kimi-k2.6-solo/trial-0 \
   --issue $ISSUE --condition kimi-k2.6-solo \
   --planner kimi-k2.6 --implementer kimi-k2.6 \
   --plan-path runs/$TS/shared-plans/kimi-k2.6/trial-0/plan.md --trial 0
 
 # 3) judge (one per condition × judge) — commit SHA from the implement result.json
-uv run python scripts/run_phase.py --phase judge \
+uv run "$SKILL_DIR/scripts/run_phase.py" --phase judge \
   --run-dir runs/$TS --out-dir runs/$TS/conditions/kimi-k2.6-solo/trial-0 \
   --issue $ISSUE --condition kimi-k2.6-solo --judge-key gpt-5.5 \
   --build-dir runs/$TS/conditions/kimi-k2.6-solo/trial-0/worktree --commit-sha <SHA> --trial 0
 
 # 4) aggregate → results.json  +  5) plot → results/*.png
-uv run python scripts/aggregate.py runs/$TS
-uv run python scripts/plots_example.py runs/$TS    # run in place; copy to runs/$TS/plots.py to customize
+uv run "$SKILL_DIR/scripts/aggregate.py" runs/$TS
+uv run "$SKILL_DIR/scripts/plots_example.py" runs/$TS    # run in place; copy to runs/$TS/plots.py to customize
 ```
 
 Long phase jobs are meant to run detached in `tmux`; see the `duobench` skill for
@@ -182,10 +191,9 @@ the launch/gate/cap recipe the agent uses.
 
 The implementer commits into a worktree of the **current directory**, so to
 benchmark an issue that lives in a *different* repo, run the phase jobs **from a
-clone of that repo** while importing duobench + configs from this one:
+clone of that repo**:
 
 ```bash
-DUO=$PWD                                              # this repo
 TGT=~/repos/duobench-targets/flask-4041              # the target clone
 
 # clone at the PRE-FIX base (first parent of the fixing PR's merge commit)
@@ -193,14 +201,13 @@ BASE=$(gh api repos/pallets/flask/commits/<merge_sha> -q '.parents[0].sha')
 git clone https://github.com/pallets/flask.git "$TGT" && git -C "$TGT" checkout "$BASE"
 git -C "$TGT" config extensions.worktreeConfig true  # REQUIRED, else implement jobs fail
 
-# launch every phase with cwd=clone, project=this repo, ABSOLUTE config paths
-cd "$TGT" && uv run --project "$DUO" python "$DUO/scripts/run_phase.py" --phase plan \
-  --models-config "$DUO/config/models.yaml" --conditions-config "$DUO/config/conditions.yaml" \
-  --run-dir "$DUO/runs/$TS" --out-dir "$DUO/runs/$TS/shared-plans/kimi-k2.6/trial-0" \
+# launch every phase with cwd=clone; scripts/configs resolve inside the skill
+cd "$TGT" && uv run "$SKILL_DIR/scripts/run_phase.py" --phase plan \
+  --run-dir "$RUNS/$TS" --out-dir "$RUNS/$TS/shared-plans/kimi-k2.6/trial-0" \
   --issue https://github.com/pallets/flask/issues/4041 --planner kimi-k2.6 --trial 0
 ```
 
-Keep the run dir, `results.json`, and plots under this repo (`$DUO/runs/$TS`). See
+Keep the run dir, `results.json`, and plots under your chosen output dir. See
 `SKILL.md` §1.5 for the full recipe.
 
 ### `run_phase.py` flags
@@ -224,12 +231,12 @@ Keep the run dir, `results.json`, and plots under this repo (`$DUO/runs/$TS`). S
 ## Models & Costs
 
 `--planner`, `--implementer`, and `--judge-key` accept either a **registry key**
-from `config/models.yaml` (`kimi-k2.6`, `gpt-5.5`) or a raw **Pi spec**
+from the skill's `config/models.yaml` (`kimi-k2.6`, `gpt-5.5`) or a raw **Pi spec**
 (`kimi-coding/kimi-for-coding`, `openai-codex/gpt-5.5`), optionally with a
 `:thinking` suffix (`off|minimal|low|medium|high|xhigh`).
 
 Cost prefers Pi/provider-reported cost (`cost_source: pi_reported`); otherwise it
-falls back to the model's `pricing` block in `config/models.yaml`, then
+falls back to the model's `pricing` block in the skill's `config/models.yaml`, then
 `costs.yaml` (rates are $/MTok, `cost_source: configured`). If none is available,
 cost is `0` with source `unknown` and quality-per-dollar is meaningless — the
 aggregate leaderboard warns about this.

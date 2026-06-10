@@ -1,6 +1,12 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "pyyaml>=6.0",
+# ]
+# ///
 """Assemble results.json from a run dir's trial.json files. Pure: NO model calls.
 
-    uv run python scripts/aggregate.py runs/<ts> [--judges kimi-k2.6,gpt-5.5]
+    uv run "$SKILL_DIR"/scripts/aggregate.py runs/<ts> [--judges kimi-k2.6,gpt-5.5]
 
 Run this after all judge jobs for a run have finished (and again after adding a
 new condition). It folds every conditions/*/trial-*/trial.json into the judged
@@ -15,7 +21,7 @@ import argparse
 import sys
 from pathlib import Path
 
-# Allow `uv run python scripts/aggregate.py` without installing the package.
+# Allow `uv run "$SKILL_DIR"/scripts/aggregate.py` without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from duobench import engine  # noqa: E402

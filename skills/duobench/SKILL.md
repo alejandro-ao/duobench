@@ -17,12 +17,29 @@ implementer makes ONE local commit fixing the issue (no push, no PR); a panel of
 judge LLMs scores each commit on 4 dimensions; cost comes from token usage.
 
 You are the orchestrator. There is no monolithic CLI. You launch thin phase jobs
-(`scripts/run_phase.py`, one Pi RPC instance each) across tmux sessions, gate each
-phase on completion, aggregate, and plot. Work from the current working directory
-when it is the duobench repo root. If the current directory is not the duobench
-repo, ask the user where the duobench repo lives before spending. Store results
-under `./runs/<timestamp>` by default unless the user asks for a different output
-directory.
+(one Pi RPC instance each) across tmux sessions, gate each phase on completion,
+aggregate, and plot.
+
+**Path model.** This skill is installed standalone (e.g. via `npx skills add`) and
+is fully self-contained:
+
+```bash
+SKILL_DIR=<absolute path to the directory containing this SKILL.md>
+```
+
+Everything you launch lives under it: `$SKILL_DIR/scripts/` (phase runner,
+aggregator, plotters — each carries PEP 723 inline deps, so `uv run <script>`
+works with no project setup), `$SKILL_DIR/src/duobench/` (engine),
+`$SKILL_DIR/config/` (model registry + judges), `$SKILL_DIR/prompts/`. The
+engine resolves prompts/configs relative to the skill dir, never the cwd.
+
+The **cwd of a phase job is the repo being benchmarked** (the engine worktrees
+`Path.cwd()`). That is usually NOT the directory the user is sitting in — see §1.5.
+
+**Be pedagogical.** The user may be running this for the first time. Before each
+phase, explain in one or two sentences what it does, why it comes now, and what
+artifact it will produce. Surface costs, defaults, and where things are written
+*before* spending, not after.
 
 ## §0 Operating contract (read first)
 
@@ -34,13 +51,40 @@ directory.
 - **Never push or open PRs.** Always pass `--submission-mode local_commit` (the
   default). The engine installs git/gh safety wrappers outside the solution
   worktree; do not fight them.
+- **Announce the output directory up front.** Default `./duobench-runs/<TS>`
+  (relative to where the user invoked you); state it at the start of the
+  conversation and invite the user to change it. `RUNS=<chosen dir>` below.
 - **Confirm before spending.** Show the issue, the resolved condition list, the
-  judge panel, trials, output directory (default `./runs/<timestamp>`), and the
-  estimated job count. Wait for a go-ahead.
+  judge panel, trials, the output directory, and the estimated job count. Wait
+  for a go-ahead.
 - **Default to `--trials 1`.**
-- **`runs/<ts>/run_state.json` is the source of truth**, not your memory. After
+- **`$RUNS/<TS>/run_state.json` is the source of truth**, not your memory. After
   any uncertainty or context loss, reconstruct state from disk + `tmux ls` —
   never guess which jobs ran.
+
+## §0.5 Setup & preflight (run before the first benchmark)
+
+Check the toolchain; offer to install anything missing and explain what each
+piece is for:
+
+```bash
+command -v uv tmux git gh jq        # uv runs the scripts; tmux hosts phase jobs
+command -v pi && pi --version       # Pi: the RPC harness that drives each model
+gh auth status                      # planner/implementer read the issue via gh
+```
+
+- Missing `uv` → `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- Missing `tmux` → `brew install tmux` (macOS) / distro package manager
+- Missing `pi` → point the user at Pi's install docs; you cannot benchmark without it.
+
+**Verify the requested models are actually available in Pi** before launching
+money jobs: every model key must resolve in `$SKILL_DIR/config/models.yaml`, and
+its `provider/model_id` must be registered + authenticated in the user's Pi
+install. The engine fails fast with a clear message when Pi rejects `set_model`,
+but it's cheaper to catch this in preflight — check Pi's configured providers
+(its models/auth listing) and tell the user which providers still need auth
+before any spend. Also tell the user which models the bundled registry knows
+out of the box.
 
 ## §1 Elicit the issue + models
 
@@ -54,59 +98,37 @@ directory.
   to score on one commit). Confirm the pick before spending. A recent issue
   reduces pretraining-contamination risk; it does not eliminate it because agents
   still inspect public runtime evidence such as issues, comments, and linked PRs.
-- Resolve model names to registry keys in `config/models.yaml`:
+- Resolve model names to registry keys in `$SKILL_DIR/config/models.yaml`:
   `opus → claude-opus-4.8`, `kimi → kimi-k2.6`, `gpt → gpt-5.5`. If a name is not
   in the registry, warn that it's passed to Pi as a raw `provider/model_id` spec
   with no pricing (`cost_source` becomes `unknown`, so quality-per-dollar is
-  unreliable) and confirm.
-- Confirm the **judge panel**. Default to the `judges:` list in `config/models.yaml`.
+  unreliable) and confirm. To change pricing/judges, copy the bundled config into
+  the run dir, edit the copy, and pass `--models-config <copy>` to every job of
+  that run — don't edit the installed skill in place.
+- Confirm the **judge panel**. Default to the `judges:` list in the registry.
   Offer to add the competing models as judges — multiple judges are averaged per
   build (aggregate auto-discovers every `results/judge-*.json`), and having each
   competitor judge its rivals is what makes the **self-bias chart** meaningful.
   Keep the judge panel/config **identical across runs** you intend to compare, so
   quality is measured by the same instrument.
 
-## §1.5 Issue from ANOTHER repo (SWE-bench style) — READ if the issue isn't this repo
+## §1.5 Prepare the target repo (where the phase jobs run)
 
-The engine worktrees **`Path.cwd()`** (`run_phase.py` exposes no `--repo-dir`). So
-the implementer commits into a worktree of whatever repo is the current directory.
-To benchmark an issue from a *different* repo you must run the phase jobs **from a
-clone of that repo**, while still importing duobench + configs from THIS repo:
+The engine worktrees **`Path.cwd()`**, so every phase job must be launched with
+cwd = a checkout of the issue's repo. Even when the issue belongs to the repo
+the user is sitting in, prefer a **dedicated clone at the pre-fix base commit**
+— it keeps benchmark worktrees out of their working copy and pins exactly what
+the models see. Short version (`TGT=<absolute target clone path>`):
 
-1. **Inspect and record issue/fix metadata.** Prefer a recent issue with a known
-   fixing PR/commit. Record the issue creation date, fixing PR URL, fix commit,
-   and pre-fix base commit in `run_state.json` (see §3).
-   ```bash
-   gh issue view <n> --repo <owner>/<repo> --json createdAt,title,url
-   gh pr view <pr> --repo <owner>/<repo> --json url,mergeCommit
-   ```
-2. **Clone at the pre-fix base.** base = first parent of the fixing PR's merge:
-   ```bash
-   gh api repos/<owner>/<repo>/commits/<merge_sha> -q '.parents[0].sha'
-   git clone https://github.com/<owner>/<repo>.git <target-clone-dir>
-   git -C <target-clone-dir> checkout <base_sha>
-   ```
-3. **Enable worktree config on the clone (REQUIRED — else every implement job dies)**
-   with `git config --worktree core.hooksPath` failing:
-   ```bash
-   git -C <clone> config extensions.worktreeConfig true
-   ```
-   This repo has it on already; fresh clones do not.
-4. **Launch jobs with cwd = the clone, project = this repo, ABSOLUTE config paths**
-   (relative `config/*.yaml` would silently fall back to packaged defaults, losing
-   your pricing/judges). Pattern for every `run_phase.py` call:
-   ```bash
-   DUO=<absolute-path-to-duobench-repo> ; TGT=<absolute-path-to-target-clone>
-   cd $TGT && uv run --project $DUO python $DUO/scripts/run_phase.py \
-     --models-config $DUO/config/models.yaml --conditions-config $DUO/config/conditions.yaml \
-     --run-dir $DUO/runs/$TS --out-dir $DUO/runs/$TS/... --issue '<external issue url>' ...
-   ```
-   Keep the **run dir, results.json, and plots in the chosen output directory**
-   (default `$DUO/runs/$TS`).
-5. The `--issue` is the external URL; planner/implementer use `gh` against the
-   clone's origin to read it. `local_commit` mode blocks push and strips upstream.
+```bash
+gh api repos/<owner>/<repo>/commits/<fix_merge_sha> -q '.parents[0].sha'   # pre-fix base
+git clone https://github.com/<owner>/<repo>.git "$TGT"
+git -C "$TGT" checkout <base_sha>
+git -C "$TGT" config extensions.worktreeConfig true   # REQUIRED — implement jobs die without it
+```
 
-Verified working on `pallets/flask#4041` (base `d8c37f43`).
+Full detail (issue/fix metadata capture, failure signatures, the verified
+flask#4041 walkthrough): read **`references/external-repo.md`** in this skill.
 
 ## §2 Expand the planner×implementer matrix
 
@@ -118,7 +140,7 @@ Verified working on `pallets/flask#4041` (base `d8c37f43`).
   and the join key everywhere — compute them exactly. You can confirm them with:
 
   ```bash
-  uv run python -c "from duobench.engine import condition_id_for as c; print(c('claude-opus-4.8','kimi-k2.6'))"
+  uv run python -c "import sys; sys.path.insert(0, '$SKILL_DIR/src'); from duobench.engine import condition_id_for as c; print(c('claude-opus-4.8','kimi-k2.6'))"
   ```
 
 - **Unique planners** (one plan job each) = the deduped planner column.
@@ -131,18 +153,18 @@ Example (opus + kimi): conditions `claude-opus-4.8-solo`, `kimi-k2.6-solo`,
 
 ```bash
 TS=$(date -u +%Y-%m-%dT%H-%M-%S)
-mkdir -p runs/$TS
+mkdir -p "$RUNS/$TS"
 ```
 
-Write `runs/$TS/run_state.json` **before launching anything**:
+Write `$RUNS/$TS/run_state.json` **before launching anything**:
 
 ```json
 {
   "run_ts": "<TS>", "issue": "<url>", "submission_mode": "local_commit",
   "issue_created_at": "<ISO timestamp if known>",
   "issue_selected_at": "<ISO timestamp when picked>",
-  "target_repo": "<owner/repo if external>",
-  "target_repo_dir": "<absolute target clone path if external>",
+  "target_repo": "<owner/repo>",
+  "target_repo_dir": "<absolute target clone path>",
   "base_commit_sha": "<pre-fix base commit if known>",
   "fix_commit_sha": "<known merged fixing commit if known>",
   "fix_pr_url": "<known fixing PR URL if known>",
@@ -166,46 +188,44 @@ For each phase: launch all its jobs (respecting the concurrency cap), then **blo
 until every expected `result.json` exists** before the next phase.
 
 1. **Plan** — one job per unique planner × trial →
-   `runs/$TS/shared-plans/<planner-safe>/trial-<n>/`.
+   `$RUNS/$TS/shared-plans/<planner-safe>/trial-<n>/`.
 2. **Implement** — one job per condition × trial →
-   `runs/$TS/conditions/<cond_id>/trial-<n>/`. Each `--plan-path` points at its
+   `$RUNS/$TS/conditions/<cond_id>/trial-<n>/`. Each `--plan-path` points at its
    planner's `plan.md`.
 3. **Judge** — only after all impls are terminal: one job per condition × judge ×
    trial, writing `results/judge-<judge>.json` into the trial dir.
-4. **Aggregate** — `uv run python scripts/aggregate.py runs/$TS`.
-5. **Plot** — `uv run python scripts/plots_example.py runs/$TS` (see §7).
+4. **Aggregate** — `uv run "$SKILL_DIR/scripts/aggregate.py" "$RUNS/$TS"`.
+5. **Plot** — `uv run "$SKILL_DIR/scripts/plots_example.py" "$RUNS/$TS"` (see §7).
 
 ## §6 tmux recipe
 
 Session name: `duobench__<TS>__<phase>__<unit>` (plan: `<planner>__t<n>`;
 implement: `<cond>__t<n>`; judge: `<cond>__<judge>__t<n>`).
 
-The commands below assume the issue is **this** repo. For an issue from another
-repo, replace the `cd $PWD && uv run python` prefix with the cwd=clone /
-`uv run --project $DUO` / absolute-config form from **§1.5**.
+Every job: **cwd = the target clone (`$TGT`), script + configs from `$SKILL_DIR`,
+artifacts into `$RUNS/$TS`** — use absolute paths for all three.
 
 **Launch a plan job:**
 ```bash
-P=claude-paths... # see below
 JOB="duobench__${TS}__plan__claude-opus-4.8__t0"
-OUT="runs/$TS/shared-plans/claude-opus-4.8/trial-0"
+OUT="$RUNS/$TS/shared-plans/claude-opus-4.8/trial-0"
 mkdir -p "$OUT"
 tmux new-session -d -s "$JOB" \
-  "cd $PWD && PYTHONUNBUFFERED=1 uv run python scripts/run_phase.py \
-     --phase plan --run-dir runs/$TS --out-dir $OUT \
+  "cd $TGT && PYTHONUNBUFFERED=1 uv run $SKILL_DIR/scripts/run_phase.py \
+     --phase plan --run-dir $RUNS/$TS --out-dir $OUT \
      --issue '$ISSUE' --planner claude-opus-4.8 --trial 0 \
      > $OUT/job.log 2>&1; echo __DUOBENCH_EXIT=\$? >> $OUT/job.log"
 ```
 
 **Launch an implement job** (`--plan-path` = that planner's plan.md):
 ```bash
-COND="kimi-k2.6-x-claude-opus-4.8"; OUT="runs/$TS/conditions/$COND/trial-0"
+COND="kimi-k2.6-x-claude-opus-4.8"; OUT="$RUNS/$TS/conditions/$COND/trial-0"
 mkdir -p "$OUT"
 tmux new-session -d -s "duobench__${TS}__implement__${COND}__t0" \
-  "cd $PWD && PYTHONUNBUFFERED=1 uv run python scripts/run_phase.py \
-     --phase implement --run-dir runs/$TS --out-dir $OUT --condition $COND \
+  "cd $TGT && PYTHONUNBUFFERED=1 uv run $SKILL_DIR/scripts/run_phase.py \
+     --phase implement --run-dir $RUNS/$TS --out-dir $OUT --condition $COND \
      --issue '$ISSUE' --planner kimi-k2.6 --implementer claude-opus-4.8 \
-     --plan-path runs/$TS/shared-plans/kimi-k2.6/trial-0/plan.md --trial 0 \
+     --plan-path $RUNS/$TS/shared-plans/kimi-k2.6/trial-0/plan.md --trial 0 \
      --submission-mode local_commit \
      > $OUT/job.log 2>&1; echo __DUOBENCH_EXIT=\$? >> $OUT/job.log"
 ```
@@ -213,13 +233,17 @@ tmux new-session -d -s "duobench__${TS}__implement__${COND}__t0" \
 **Launch a judge job** (`--build-dir` = the trial's worktree; `--commit-sha` from
 the implement job's `result.json` `artifact.commit_sha`):
 ```bash
+OUT="$RUNS/$TS/conditions/$COND/trial-0"
 tmux new-session -d -s "duobench__${TS}__judge__${COND}__gpt-5.5__t0" \
-  "cd $PWD && PYTHONUNBUFFERED=1 uv run python scripts/run_phase.py \
-     --phase judge --run-dir runs/$TS --out-dir runs/$TS/conditions/$COND/trial-0 \
+  "cd $TGT && PYTHONUNBUFFERED=1 uv run $SKILL_DIR/scripts/run_phase.py \
+     --phase judge --run-dir $RUNS/$TS --out-dir $OUT \
      --condition $COND --issue '$ISSUE' --judge-key gpt-5.5 \
-     --build-dir runs/$TS/conditions/$COND/trial-0/worktree --commit-sha $SHA --trial 0 \
-     > runs/$TS/conditions/$COND/trial-0/job.log 2>&1; echo __DUOBENCH_EXIT=\$? >>runs/$TS/conditions/$COND/trial-0/job.log"
+     --build-dir $OUT/worktree --commit-sha $SHA --trial 0 \
+     > $OUT/job.log 2>&1; echo __DUOBENCH_EXIT=\$? >> $OUT/job.log"
 ```
+
+(If you customized the registry for this run, add
+`--models-config <copy> --conditions-config <copy>` to every call.)
 
 **Concurrency cap:** default **2** money-jobs at once. Launch up to the cap, then
 wait for a free slot. If the user says "run them all in parallel", lift the cap
@@ -247,9 +271,9 @@ list each condition's worktree and commit SHA so the user can inspect the real
 patches, for example:
 
 ```bash
-jq -r '.conditions | to_entries[] | "\(.key)"' runs/$TS/results.json
-jq -r '.meta | [.commit_sha, .build_dir] | @tsv' runs/$TS/conditions/<cond>/trial-0/trial.json
-git -C runs/$TS/conditions/<cond>/trial-0/worktree show --stat --oneline HEAD
+jq -r '.conditions | to_entries[] | "\(.key)"' "$RUNS/$TS/results.json"
+jq -r '.meta | [.commit_sha, .build_dir] | @tsv' "$RUNS/$TS/conditions/<cond>/trial-0/trial.json"
+git -C "$RUNS/$TS/conditions/<cond>/trial-0/worktree" show --stat --oneline HEAD
 ```
 
 The plots are a decision aid; human inspection of the candidate patches is the
@@ -258,31 +282,21 @@ last step before trusting a model pairing on a real project.
 ## §7 Plotting
 
 ```bash
-uv run python scripts/plots_example.py runs/$TS        # run in place — no copy needed
+uv run "$SKILL_DIR/scripts/plots_example.py" "$RUNS/$TS"   # run in place — no copy needed
 ```
 
-This writes `runs/$TS/results/*.png` (+ `.csv`), all styled consistently
-(seaborn whitegrid/talk, value labels, despined): **leaderboard**,
-**cost-vs-quality** (with iso-efficiency guide lines + a color legend instead of
-crowded per-dot labels), **dimensions**, **self-bias** (a *"does each judge favor
-its own model?"* own-vs-other bar chart — not the old heatmap), and
-**cost-breakdown** (sorted, total-cost labels).
-
-For customization ("correctness vs cost only", "facet by planner", "only opus
-conditions"): `cp scripts/plots_example.py runs/$TS/plots.py`, edit, and run
-`uv run python runs/$TS/plots.py runs/$TS`. The import self-locates `plot_styles`
-(walks up for `scripts/`), so a copied script needs **no** `PYTHONPATH`. The
-`plot_styles` loaders return tidy DataFrames with dimension names read
-dynamically, so edits are small seaborn changes. Pitfall: don't reuse the
-variable name `order` for a local list — later plot blocks reuse the
-condition-order list of that name. Never import the removed `duobench.charts`.
-Show the user the resulting PNGs.
+This writes `$RUNS/$TS/results/*.png` (+ `.csv`), all styled consistently:
+**leaderboard**, **cost-vs-quality** (iso-efficiency guide lines + legend),
+**dimensions**, **self-bias** (own-vs-other judge bars), **cost-breakdown**.
+Show the user the resulting PNGs. For customization ("correctness vs cost only",
+"facet by planner", "only opus conditions") read **`references/plotting.md`**
+in this skill.
 
 ## §5 Resume / add a condition to an existing run
 
 Trigger: "add <planner>/<implementer> to the eval".
-1. Find the target run dir (most recent under `runs/`, or the one named). Read its
-   `run_state.json` and `results.json`.
+1. Find the target run dir (most recent under `$RUNS/`, or the one named). Read
+   its `run_state.json` and `results.json`.
 2. Compute the **new** condition id(s) and set-difference against existing
    `conditions/*` dirs. e.g. "add gpt planner and kimi implementer" →
    `gpt-5.5-x-kimi-k2.6`.
@@ -290,19 +304,20 @@ Trigger: "add <planner>/<implementer> to the eval".
    it (run no plan job). Before reusing, sanity-check the planner spec recorded in
    that dir's `shared-plan.json` matches the requested model. If absent, run one
    plan job for the new planner.
-4. Run the new condition's implement + judge jobs (same tmux recipe).
-5. Re-aggregate the whole run dir (`scripts/aggregate.py runs/<ts>` rescans all
-   trials, merging old + new) and re-plot. The new condition appears in every
-   chart with its stable per-model color.
+4. Run the new condition's implement + judge jobs (same tmux recipe, same target
+   clone from `run_state.json`'s `target_repo_dir`).
+5. Re-aggregate the whole run dir (`aggregate.py` rescans all trials, merging old
+   + new) and re-plot. The new condition appears in every chart with its stable
+   per-model color.
 
 ## Failure & partial runs
 
 - **All implement jobs error instantly** with `git config --worktree ... fatal:
   --worktree cannot be used with multiple working trees unless extensions.
-  worktreeConfig is enabled` → the (usually freshly cloned) repo lacks worktree
-  config. Fix: `git -C <repo> config extensions.worktreeConfig true`, then delete
-  the failed `result.json` + `worktree/` dirs, `git -C <repo> worktree prune`, and
-  relaunch implement. (See §1.5.)
+  worktreeConfig is enabled` → the clone lacks worktree config. Fix:
+  `git -C <clone> config extensions.worktreeConfig true`, then delete the failed
+  `result.json` + `worktree/` dirs, `git -C <clone> worktree prune`, and relaunch
+  implement. (See §1.5.)
 - **Plan job fails** → block the implement jobs that depend on that plan; run the
   others; offer to retry just that plan job.
 - **Implement `timeout`/`stalled`/`stopped`** → a valid data point (flows to
@@ -327,55 +342,19 @@ Trigger: "add <planner>/<implementer> to the eval".
   (its dollar figure and efficiency are unreliable).
 - **Cost accuracy / cache pricing (important for $/quality).** Only models whose
   provider returns billed cost show `cost_source: pi_reported`; the rest are
-  `configured` (computed from `models.yaml` rates). An agentic implement loop is
+  `configured` (computed from the registry's rates). An agentic implement loop is
   ~90% **cache-read** tokens, and if a `configured` model has no `cache_read`
   rate, `cost.py` charges cache hits at the **full input price** — inflating cost
   several-fold (Kimi looked ~4× too expensive until we set `cache_read: 0.16`).
-  So: every `configured` model in `models.yaml` should have a `cache_read` (and,
+  So: every `configured` model in the registry should have a `cache_read` (and,
   if known, `cache_write`) rate. If you can't get a real rate, say so — don't
   compare a `pi_reported` model against a `configured`-at-full-cache model and
   call it fair. (Already set: `kimi-k2.6 cache_read: 0.16`. `gpt-5.5` unset.)
   With rates in place, cost is correct at run time and no post-hoc recompute is
   needed.
 
-## §8 Scaling to many issues/trials for statistical robustness (OPT-IN, EXPENSIVE)
+## §8 Many issues / trials
 
-**Do NOT do this by default.** The default is one issue, `--trials 1` — cheap and
-fast. A single issue is an *anecdote*, not a scientific result, but multi-issue
-sweeps cost real money (`issues × conditions × (planners + impl + judges) ×
-trials` model jobs) and hit rate limits. Only run this when the user explicitly
-asks to "make it scientific" / "run on multiple issues" / "average over runs",
-and **confirm the full job count + rough cost first**.
-
-**Two axes of replication (issues matter far more than trials):**
-- **Trials per condition** (same issue) average out seed noise — LLMs vary even at
-  temp 0. **3–5 trials** captures it; below 3 you can't estimate noise.
-- **Distinct issues** drive generalizability and dominate the variance. Rough
-  guide: **~10** issues = directional (enough for the big cost/efficiency gap),
-  **~30** = defensible "scientific" (report per-condition means with 95% CIs),
-  **50–100+** = strong/publishable. Tiny quality gaps (e.g. 7.5–8.5, within judge
-  noise) may *never* separate — report that as the finding rather than chasing it.
-
-**Design rules that make few issues go further:**
-- **Paired/blocked:** run every condition on the *same* issue set, then compare
-  *per-issue deltas* and **win-rates** ("Kimi beat Opus on $/quality on 27/30
-  issues"), not just averaged means. duobench is naturally paired (all conditions
-  share each issue) — exploit it; it sharply cuts the issues needed for power.
-- **No selection bias:** sample a curated set across repos/difficulty (e.g. a
-  SWE-bench Lite subset), don't hand-pick. (This is exactly what repo issue #5
-  "benchmark-suite mode" is for.)
-
-**Mechanics (no new engine code needed — reuse the per-unit flow):**
-1. Run the full §4 pipeline **once per issue** into a sibling run dir, e.g.
-   `runs/<ts>/issues/<owner>-<repo>-<num>/` (or one `runs/<ts>__<issue>/` each).
-   For each issue from another repo, follow §1.5 (clone at its own pre-fix base).
-   Condition ids are stable across issues, so they're the join key.
-2. With `--trials N`, every phase job multiplies by N (`trial-0..N-1` dirs);
-   `aggregate.py` already means-and-stds across a run's trials per condition.
-3. **Cross-issue meta-aggregation** (small pandas step, not a model call): load
-   each issue's `results.json`, group by `condition_id`, and average quality +
-   cost across issues; also compute the paired win-rate per condition pair. Plot
-   means with CI error bars (`cost_std`/`quality_std` × 1.96/√n) and a win-rate
-   matrix. Keep per-issue `results.json` so nothing is lost.
-4. Report it honestly: n (issues × trials), CIs, and which conclusions are robust
-   (usually cost) vs within-noise (often quality).
+A single issue is an anecdote. When the user asks to "make it scientific", "run
+on multiple issues", or "average over runs", read **`references/scaling.md`** in
+this skill — it is opt-in and expensive; never default to it.

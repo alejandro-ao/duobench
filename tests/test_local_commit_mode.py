@@ -52,9 +52,9 @@ def _cfg() -> Config:
 
 
 def _load_prompt_text(name: str) -> str:
-    """Load a packaged prompt by name (matching how run._load_prompt loads them)."""
-    from importlib import resources
-    return (resources.files("duobench.defaults.prompts") / name).read_text()
+    """Load a bundled skill prompt by name (matching how engine._load_prompt loads them)."""
+    from duobench.engine import _load_prompt
+    return _load_prompt(name)
 
 
 # --- prompt regression -------------------------------------------------------

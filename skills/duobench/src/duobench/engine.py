@@ -28,11 +28,10 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
-from importlib import resources
 from pathlib import Path
 
 from duobench.aggregate import TrialRecord, aggregate
-from duobench.config import Condition, Config, ConfigError, Model
+from duobench.config import SKILL_ROOT, Condition, Config, ConfigError, Model
 from duobench.cost import compute_cost
 from duobench.fingerprint import make_benchmark_fingerprint
 from duobench.impl_phase import run_impl_phase
@@ -59,11 +58,8 @@ _MAX_STAT_CHARS = 30_000
 
 
 def _load_prompt(name: str) -> str:
-    """Load prompt from ./prompts when present, otherwise from packaged defaults."""
-    local = Path("prompts") / name
-    if local.is_file():
-        return local.read_text()
-    return (resources.files("duobench.defaults.prompts") / name).read_text()
+    """Load a prompt bundled with the skill (cwd is the target repo, never consulted)."""
+    return (SKILL_ROOT / "prompts" / name).read_text()
 
 
 def load_prompts(submission_mode: str, issue_url: str) -> dict[str, str]:

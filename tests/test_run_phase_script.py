@@ -18,7 +18,7 @@ from duobench.cost import PhaseCost
 from duobench.impl_phase import ImplResult
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "scripts"))
+sys.path.insert(0, str(REPO / "skills" / "duobench" / "scripts"))
 
 import run_phase  # noqa: E402
 

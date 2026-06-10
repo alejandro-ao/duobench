@@ -1,10 +1,16 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "pyyaml>=6.0",
+# ]
+# ///
 """Run ONE duobench phase as ONE Pi RPC instance, then write a result.json sentinel.
 
 This is the atomic unit the duobench skill launches (one per tmux session):
 
-    uv run python scripts/run_phase.py --phase plan      --planner kimi-k2.6  ...
-    uv run python scripts/run_phase.py --phase implement --planner kimi-k2.6 --implementer gpt-5.5 ...
-    uv run python scripts/run_phase.py --phase judge     --judge-key gpt-5.5  ...
+    uv run "$SKILL_DIR"/scripts/run_phase.py --phase plan      --planner kimi-k2.6  ...
+    uv run "$SKILL_DIR"/scripts/run_phase.py --phase implement --planner kimi-k2.6 --implementer gpt-5.5 ...
+    uv run "$SKILL_DIR"/scripts/run_phase.py --phase judge     --judge-key gpt-5.5  ...
 
 The script's LAST action is an atomic write of ``<out-dir>/result.json`` (or, for
 judge jobs, ``<out-dir>/results/judge-<key>.json``). Its mere presence is the
@@ -24,7 +30,7 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Allow `uv run python scripts/run_phase.py` without installing the package.
+# Allow `uv run "$SKILL_DIR"/scripts/run_phase.py` without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from duobench import engine  # noqa: E402
@@ -58,8 +64,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     ap.add_argument("--condition", default="")
     ap.add_argument("--submission-mode", default="local_commit", choices=["local_commit", "pr"])
     ap.add_argument("--no-pi-sessions", action="store_true", help="do not persist Pi sessions")
-    ap.add_argument("--models-config", default="config/models.yaml")
-    ap.add_argument("--conditions-config", default="config/conditions.yaml")
+    ap.add_argument("--models-config", default=None, help="defaults to the skill's config/models.yaml")
+    ap.add_argument("--conditions-config", default=None, help="defaults to the skill's config/conditions.yaml")
     ap.add_argument("--costs-config", default="costs.yaml")
     ap.add_argument("--timeout", type=float, default=None, help="phase wall-clock timeout (defaults per phase)")
     # plan

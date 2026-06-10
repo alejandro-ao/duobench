@@ -83,7 +83,7 @@ def test_conditions_yaml_accepts_direct_pi_specs(tmp_path):
         "    implementer: kimi-k2.6\n"
     )
     cfg = load_config(
-        models_path="config/models.yaml",
+        models_path=None,  # skill-bundled default registry
         conditions_path=conditions_yaml,
         costs_path=tmp_path / "missing-costs.yaml",
     )
@@ -103,7 +103,7 @@ def test_conditions_yaml_accepts_registry_keys_with_thinking_suffix(tmp_path):
         "    implementer: kimi-k2.6\n"
     )
     cfg = load_config(
-        models_path="config/models.yaml",
+        models_path=None,  # skill-bundled default registry
         conditions_path=conditions_yaml,
         costs_path=tmp_path / "missing-costs.yaml",
     )
@@ -120,7 +120,7 @@ def test_conditions_yaml_rejects_unknown_key_without_provider(tmp_path):
     )
     with pytest.raises(ConfigError, match="not a known model key"):
         load_config(
-            models_path="config/models.yaml",
+            models_path=None,  # skill-bundled default registry
             conditions_path=conditions_yaml,
             costs_path=tmp_path / "missing-costs.yaml",
         )
