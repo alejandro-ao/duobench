@@ -9,7 +9,7 @@
     ╚═════╝  ╚═════╝  ╚═════╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝╚═╝  ╚═╝
 ```
 
-<h3>Benchmark planner × implementer AI coding-agent duos on real GitHub issues — orchestrated by an agent, charted as quality-per-dollar</h3>
+<h3>An agent skill that benchmarks planner × implementer LLM duos on real GitHub issues and charts quality-per-dollar</h3>
 
 <p>
   <a href="https://github.com/alejandro-ao/duobench/blob/main/LICENSE">
@@ -33,9 +33,42 @@
 
 ## Overview
 
-**duobench** measures which **planner LLM × implementer LLM** duo produces the
+**duobench is not a CLI — it's a skill for coding agents** (Claude Code and
+compatible harnesses). You install it once with `npx skills add`, then ask your
+agent in plain language to run a benchmark; the agent does the orchestration.
+
+It measures which **planner LLM × implementer LLM** duo produces the
 best **quality-per-dollar** on a real GitHub issue, scored by a panel of judge
 LLMs over [Pi](https://pi.dev) RPC.
+
+### Prompts that trigger it
+
+> *"Benchmark the quality:cost ratio of kimi planning + gpt-5.5 implementing,
+> and vice versa, on issue #4041 of pallets/flask."*
+
+> *"Benchmark opus and kimi on duobench and produce plots about the results."*
+
+> *"Add a gpt planner / kimi implementer condition to the last duobench run and
+> re-plot."*
+
+> *"Re-plot the last duobench run, but correctness vs cost only, faceted by
+> planner."*
+
+### What you get
+
+Every run ends with a `results.json`, per-condition worktrees + commits you can
+inspect by hand, and a set of seaborn charts. From a real run on
+[`pallets/flask#4041`](https://github.com/pallets/flask/issues/4041) with
+opus-4.8 × kimi-k2.6 (4 conditions, 2 judges):
+
+<p align="center">
+  <img src="docs/assets/cost-vs-quality.png" alt="Cost vs quality — the money chart" width="49%">
+  <img src="docs/assets/leaderboard.png" alt="Quality leaderboard per condition" width="49%">
+</p>
+<p align="center">
+  <img src="docs/assets/cost-breakdown.png" alt="Plan vs implement cost per condition" width="49%">
+  <img src="docs/assets/self-bias.png" alt="Does each judge favor its own model?" width="49%">
+</p>
 
 There is **no monolithic CLI**. An **agent orchestrates** the benchmark: it
 launches thin per-phase jobs (one Pi RPC instance each) across `tmux` sessions,
