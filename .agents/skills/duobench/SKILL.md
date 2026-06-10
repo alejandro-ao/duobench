@@ -18,8 +18,11 @@ judge LLMs scores each commit on 4 dimensions; cost comes from token usage.
 
 You are the orchestrator. There is no monolithic CLI. You launch thin phase jobs
 (`scripts/run_phase.py`, one Pi RPC instance each) across tmux sessions, gate each
-phase on completion, aggregate, and plot. Work from the repo root
-(`/Users/alejandro/repos/kimi-claude-bench`) with `uv`.
+phase on completion, aggregate, and plot. Work from the current working directory
+when it is the duobench repo root. If the current directory is not the duobench
+repo, ask the user where the duobench repo lives before spending. Store results
+under `./runs/<timestamp>` by default unless the user asks for a different output
+directory.
 
 ## §0 Operating contract (read first)
 
@@ -29,9 +32,11 @@ phase on completion, aggregate, and plot. Work from the repo root
   implement, judge) run in tmux. Short pure steps (aggregate, plotting) run with
   a plain background `Bash`.
 - **Never push or open PRs.** Always pass `--submission-mode local_commit` (the
-  default). The engine installs git/gh safety wrappers; do not fight them.
+  default). The engine installs git/gh safety wrappers outside the solution
+  worktree; do not fight them.
 - **Confirm before spending.** Show the issue, the resolved condition list, the
-  judge panel, trials, and the estimated job count. Wait for a go-ahead.
+  judge panel, trials, output directory (default `./runs/<timestamp>`), and the
+  estimated job count. Wait for a go-ahead.
 - **Default to `--trials 1`.**
 - **`runs/<ts>/run_state.json` is the source of truth**, not your memory. After
   any uncertainty or context loss, reconstruct state from disk + `tmux ls` —
@@ -42,10 +47,13 @@ phase on completion, aggregate, and plot. Work from the repo root
 - If the user named models but no issue, **ask for the GitHub issue URL** (accept
   `owner/repo#123` or a full URL). Real runs cannot proceed without it.
 - **If the user asks you to pick an issue**, choose one that is: from a public
-  repo, **single-commit-fixable**, self-contained, medium-hard, and — crucially —
-  has a **known fixing PR/commit** so you can check out the pre-fix base (§1.5).
-  Pure-Python repos (Flask, requests, marshmallow…) judge cleanly. Avoid sprawling
-  features (hard to score on one commit). Confirm the pick before spending.
+  repo, **recent** (ideally opened within the last few weeks), **single-commit-
+  fixable**, self-contained, medium-hard, and — crucially — has a **known fixing
+  PR/commit** so you can check out the pre-fix base (§1.5). Pure-Python repos
+  (Flask, requests, marshmallow…) judge cleanly. Avoid sprawling features (hard
+  to score on one commit). Confirm the pick before spending. A recent issue
+  reduces pretraining-contamination risk; it does not eliminate it because agents
+  still inspect public runtime evidence such as issues, comments, and linked PRs.
 - Resolve model names to registry keys in `config/models.yaml`:
   `opus → claude-opus-4.8`, `kimi → kimi-k2.6`, `gpt → gpt-5.5`. If a name is not
   in the registry, warn that it's passed to Pi as a raw `provider/model_id` spec
@@ -65,29 +73,37 @@ the implementer commits into a worktree of whatever repo is the current director
 To benchmark an issue from a *different* repo you must run the phase jobs **from a
 clone of that repo**, while still importing duobench + configs from THIS repo:
 
-1. **Clone at the pre-fix base.** base = first parent of the fixing PR's merge:
+1. **Inspect and record issue/fix metadata.** Prefer a recent issue with a known
+   fixing PR/commit. Record the issue creation date, fixing PR URL, fix commit,
+   and pre-fix base commit in `run_state.json` (see §3).
+   ```bash
+   gh issue view <n> --repo <owner>/<repo> --json createdAt,title,url
+   gh pr view <pr> --repo <owner>/<repo> --json url,mergeCommit
+   ```
+2. **Clone at the pre-fix base.** base = first parent of the fixing PR's merge:
    ```bash
    gh api repos/<owner>/<repo>/commits/<merge_sha> -q '.parents[0].sha'
-   git clone https://github.com/<owner>/<repo>.git ~/repos/duobench-targets/<repo>-<issue>
-   git -C ~/repos/duobench-targets/<repo>-<issue> checkout <base_sha>
+   git clone https://github.com/<owner>/<repo>.git <target-clone-dir>
+   git -C <target-clone-dir> checkout <base_sha>
    ```
-2. **Enable worktree config on the clone (REQUIRED — else every implement job dies)**
+3. **Enable worktree config on the clone (REQUIRED — else every implement job dies)**
    with `git config --worktree core.hooksPath` failing:
    ```bash
    git -C <clone> config extensions.worktreeConfig true
    ```
    This repo has it on already; fresh clones do not.
-3. **Launch jobs with cwd = the clone, project = this repo, ABSOLUTE config paths**
+4. **Launch jobs with cwd = the clone, project = this repo, ABSOLUTE config paths**
    (relative `config/*.yaml` would silently fall back to packaged defaults, losing
    your pricing/judges). Pattern for every `run_phase.py` call:
    ```bash
-   DUO=/Users/alejandro/repos/kimi-claude-bench ; TGT=<clone>
+   DUO=<absolute-path-to-duobench-repo> ; TGT=<absolute-path-to-target-clone>
    cd $TGT && uv run --project $DUO python $DUO/scripts/run_phase.py \
      --models-config $DUO/config/models.yaml --conditions-config $DUO/config/conditions.yaml \
      --run-dir $DUO/runs/$TS --out-dir $DUO/runs/$TS/... --issue '<external issue url>' ...
    ```
-   Keep the **run dir, results.json, and plots inside this repo** (`$DUO/runs/$TS`).
-4. The `--issue` is the external URL; planner/implementer use `gh` against the
+   Keep the **run dir, results.json, and plots in the chosen output directory**
+   (default `$DUO/runs/$TS`).
+5. The `--issue` is the external URL; planner/implementer use `gh` against the
    clone's origin to read it. `local_commit` mode blocks push and strips upstream.
 
 Verified working on `pallets/flask#4041` (base `d8c37f43`).
@@ -123,6 +139,13 @@ Write `runs/$TS/run_state.json` **before launching anything**:
 ```json
 {
   "run_ts": "<TS>", "issue": "<url>", "submission_mode": "local_commit",
+  "issue_created_at": "<ISO timestamp if known>",
+  "issue_selected_at": "<ISO timestamp when picked>",
+  "target_repo": "<owner/repo if external>",
+  "target_repo_dir": "<absolute target clone path if external>",
+  "base_commit_sha": "<pre-fix base commit if known>",
+  "fix_commit_sha": "<known merged fixing commit if known>",
+  "fix_pr_url": "<known fixing PR URL if known>",
   "trials": 1, "concurrency_cap": 2, "phase": "plan",
   "judges": ["kimi-k2.6", "gpt-5.5"],
   "unique_planners": ["claude-opus-4.8", "kimi-k2.6"],
@@ -218,6 +241,19 @@ Only advance to the next phase when every expected `result.json` is present.
 
 **Let the user watch:** `tmux attach -t <JOB>` (detach with **Ctrl-b then d**),
 `tmux ls` to list duobench jobs, `tail -f <out>/job.log`.
+
+**After the run, point the human at the actual fixes.** In the final response,
+list each condition's worktree and commit SHA so the user can inspect the real
+patches, for example:
+
+```bash
+jq -r '.conditions | to_entries[] | "\(.key)"' runs/$TS/results.json
+jq -r '.meta | [.commit_sha, .build_dir] | @tsv' runs/$TS/conditions/<cond>/trial-0/trial.json
+git -C runs/$TS/conditions/<cond>/trial-0/worktree show --stat --oneline HEAD
+```
+
+The plots are a decision aid; human inspection of the candidate patches is the
+last step before trusting a model pairing on a real project.
 
 ## §7 Plotting
 
