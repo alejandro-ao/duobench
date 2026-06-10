@@ -1,15 +1,6 @@
 <div align="center">
 
-```
-    ██████╗ ██╗   ██╗ ██████╗ ██████╗ ███████╗███╗   ██╗ ██████╗██╗  ██╗
-    ██╔══██╗██║   ██║██╔═══██╗██╔══██╗██╔════╝████╗  ██║██╔════╝██║  ██║
-    ██║  ██║██║   ██║██║   ██║██████╔╝█████╗  ██╔██╗ ██║██║     ███████║
-    ██║  ██║██║   ██║██║   ██║██╔══██╗██╔══╝  ██║╚██╗██║██║     ██╔══██║
-    ██████╔╝╚██████╔╝╚██████╔╝██████╔╝███████╗██║ ╚████║╚██████╗██║  ██║
-    ╚═════╝  ╚═════╝  ╚═════╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝╚═╝  ╚═╝
-```
-
-<h3>An agent skill that benchmarks planner × implementer LLM duos on real GitHub issues and charts quality-per-dollar</h3>
+<img src="docs/assets/banner.svg" alt="duobench — an agent skill: benchmark planner × implementer LLM duos on real GitHub issues, charted as quality per dollar" width="100%">
 
 <p>
   <a href="https://github.com/alejandro-ao/duobench/blob/main/LICENSE">

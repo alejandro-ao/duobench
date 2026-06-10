@@ -1,0 +1,61 @@
+<svg width="1200" height="300" viewBox="0 0 1200 300" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="duobench — benchmark planner × implementer LLM duos, charted as quality per dollar">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="0.55" stop-color="#101a2b"/>
+      <stop offset="1" stop-color="#0d2230"/>
+    </linearGradient>
+    <linearGradient id="duo" x1="330" y1="150" x2="560" y2="150" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1f77b4"/>
+      <stop offset="1" stop-color="#ff7f0e"/>
+    </linearGradient>
+  </defs>
+
+  <!-- card -->
+  <rect x="2" y="2" width="1196" height="296" rx="16" fill="url(#bg)" stroke="#2d3a4d" stroke-width="2"/>
+
+  <!-- faint grid, echoing the charts -->
+  <g stroke="#1d2939" stroke-width="1">
+    <path d="M0 80 H1200"/><path d="M0 150 H1200"/><path d="M0 220 H1200"/>
+    <path d="M300 0 V300"/><path d="M600 0 V300"/><path d="M900 0 V300"/>
+  </g>
+
+  <!-- right: mini cost-vs-quality chart -->
+  <g>
+    <!-- axes -->
+    <path d="M880 60 V240 H1140" stroke="#3d4f63" stroke-width="2" stroke-linecap="round"/>
+    <!-- iso-efficiency guide lines -->
+    <g stroke="#2c3e54" stroke-width="1.5" stroke-dasharray="5 5">
+      <path d="M880 240 L1020 60"/>
+      <path d="M880 240 L1140 95"/>
+      <path d="M880 240 L1140 175"/>
+    </g>
+    <!-- condition dots -->
+    <circle cx="935" cy="92" r="11" fill="#1f77b4" stroke="#0d1117" stroke-width="2.5"/>
+    <circle cx="985" cy="118" r="11" fill="#ffb000" stroke="#0d1117" stroke-width="2.5"/>
+    <circle cx="1018" cy="124" r="11" fill="#ff7f0e" stroke="#0d1117" stroke-width="2.5"/>
+    <circle cx="1092" cy="120" r="11" fill="#2ca08c" stroke="#0d1117" stroke-width="2.5"/>
+    <!-- better-value arrow -->
+    <path d="M992 78 L948 62" stroke="#8aa0b8" stroke-width="2" stroke-linecap="round"/>
+    <path d="M958 60 L948 62 L952 71" stroke="#8aa0b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <text x="1000" y="82" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="15" font-style="italic" fill="#8aa0b8">better value</text>
+    <!-- axis labels -->
+    <text x="1010" y="266" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" fill="#64798f" text-anchor="middle">cost ($)</text>
+    <text x="864" y="150" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" fill="#64798f" text-anchor="middle" transform="rotate(-90 864 150)">quality</text>
+  </g>
+
+  <!-- left: duo motif — planner hands off to implementer -->
+  <g>
+    <circle cx="96" cy="124" r="26" fill="#1f77b4"/>
+    <circle cx="156" cy="124" r="26" fill="#ff7f0e" fill-opacity="0.92"/>
+    <text x="96" y="131" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="19" font-weight="700" fill="#0d1117" text-anchor="middle">P</text>
+    <text x="156" y="131" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="19" font-weight="700" fill="#0d1117" text-anchor="middle">I</text>
+  </g>
+
+  <!-- wordmark -->
+  <text x="210" y="142" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="64" font-weight="800" letter-spacing="-1" fill="#e6edf3">duobench</text>
+
+  <!-- tagline -->
+  <text x="98" y="196" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="21" fill="#9fb3c8">An agent skill: benchmark <tspan fill="#5fa8e0" font-weight="600">planner</tspan> × <tspan fill="#ffa14f" font-weight="600">implementer</tspan> LLM duos on real GitHub issues</text>
+  <text x="98" y="228" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="21" fill="#9fb3c8">plan → implement → judge → <tspan fill="#e6edf3" font-weight="600">quality per dollar</tspan></text>
+</svg>
