@@ -95,10 +95,21 @@ header.hero {
 }
 .hero h1 {
   font-family: var(--display); font-variation-settings: "wdth" 110;
-  font-weight: 900; font-size: clamp(1.9rem, 7.5vw, 4rem);
-  letter-spacing: -.025em; line-height: 1.02; margin: 0 0 1rem;
+  margin: 0 0 1.1rem; letter-spacing: -.02em;
 }
-.hero h1 .x { color: var(--impl); font-weight: 500; padding: 0 .08em; }
+.hero h1 .lead-in {
+  display: block; font-weight: 500; font-size: clamp(.95rem, 2.4vw, 1.25rem);
+  color: var(--muted); letter-spacing: .01em; line-height: 1.3; margin-bottom: .35rem;
+}
+.hero h1 .lead-in .x { color: var(--impl); font-weight: 600; font-style: normal; }
+.hero h1 .ask {
+  display: block; font-weight: 900; font-size: clamp(2.2rem, 7.5vw, 4.1rem);
+  line-height: 1.0; color: var(--ink);
+}
+.hero h1 .ask em {
+  font-style: italic; font-weight: 800; font-variation-settings: "wdth" 110;
+  color: var(--impl);
+}
 .hero p.tag { font-size: 1.1rem; color: var(--muted); margin: 0 0 1.6rem; max-width: 34rem; }
 .hero p.tag strong { color: var(--ink); }
 .roles { display: flex; gap: 1.4rem; flex-wrap: wrap; font-family: var(--mono); font-size: .78rem; margin-bottom: 1.8rem; }
