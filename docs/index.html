@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>duobench — benchmark planner × implementer LLM duos</title>
+<meta name="description" content="duobench is an agent skill that benchmarks planner × implementer LLM pairings on real GitHub issues and charts quality-per-dollar.">
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-soft: #161b22;
+    --bg-card: #1c2330;
+    --border: #2d3645;
+    --text: #e6edf3;
+    --muted: #9aa7b4;
+    --accent: #58a6ff;
+    --accent2: #7ee787;
+    --warn: #f0b429;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); line-height: 1.65; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { font-family: var(--mono); font-size: .9em; background: var(--bg-card); border: 1px solid var(--border); border-radius: 5px; padding: .12em .35em; }
+  pre { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.2rem; overflow-x: auto; font-family: var(--mono); font-size: .85rem; line-height: 1.55; }
+  pre code { background: none; border: none; padding: 0; }
+  h2 { font-size: 1.7rem; margin: 0 0 .4rem; letter-spacing: -.01em; }
+  h3 { font-size: 1.15rem; margin: 2rem 0 .5rem; color: var(--accent2); }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; margin: 1rem 0; }
+  th, td { border: 1px solid var(--border); padding: .55rem .75rem; text-align: left; vertical-align: top; }
+  th { background: var(--bg-card); }
+  td code { white-space: nowrap; }
+
+  nav { position: sticky; top: 0; z-index: 10; background: rgba(13,17,23,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+  nav .inner { max-width: 980px; margin: 0 auto; padding: .7rem 1.2rem; display: flex; align-items: center; gap: 1.3rem; flex-wrap: wrap; }
+  nav .brand { font-weight: 700; font-size: 1.05rem; color: var(--text); }
+  nav a.link { color: var(--muted); font-size: .9rem; }
+  nav a.link:hover { color: var(--text); text-decoration: none; }
+  nav .gh { margin-left: auto; }
+
+  header.hero { max-width: 980px; margin: 0 auto; padding: 4.5rem 1.2rem 3rem; text-align: center; }
+  .hero h1 { font-size: 3rem; margin: 0 0 .6rem; letter-spacing: -.02em; }
+  .hero h1 span { color: var(--accent); }
+  .hero p.tag { font-size: 1.25rem; color: var(--muted); max-width: 720px; margin: 0 auto 1.6rem; }
+  .badges { display: flex; gap: .5rem; justify-content: center; margin-bottom: 1.8rem; flex-wrap: wrap; }
+  .btns { display: flex; gap: .8rem; justify-content: center; flex-wrap: wrap; }
+  .btn { display: inline-block; padding: .65rem 1.3rem; border-radius: 8px; font-weight: 600; font-size: .95rem; }
+  .btn.primary { background: var(--accent); color: #0d1117; }
+  .btn.ghost { border: 1px solid var(--border); color: var(--text); }
+  .btn:hover { text-decoration: none; filter: brightness(1.12); }
+
+  section { max-width: 980px; margin: 0 auto; padding: 3rem 1.2rem; border-top: 1px solid var(--border); }
+  .lead { color: var(--muted); font-size: 1.05rem; max-width: 760px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+  .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 1.2rem 1.3rem; }
+  .card h4 { margin: 0 0 .4rem; font-size: 1rem; }
+  .card p { margin: 0; color: var(--muted); font-size: .9rem; }
+  .pipeline { text-align: center; font-family: var(--mono); font-size: .8rem; color: var(--muted); }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1.5rem; }
+  .charts img { width: 100%; border-radius: 10px; border: 1px solid var(--border); }
+  .quote { border-left: 3px solid var(--accent); background: var(--bg-soft); padding: .7rem 1rem; border-radius: 0 8px 8px 0; margin: .8rem 0; color: var(--text); font-style: italic; }
+  .note { border: 1px solid var(--warn); border-radius: 10px; padding: .8rem 1.1rem; background: rgba(240,180,41,.07); font-size: .92rem; margin: 1.2rem 0; }
+  footer { border-top: 1px solid var(--border); text-align: center; color: var(--muted); font-size: .85rem; padding: 2.5rem 1.2rem; }
+  @media (max-width: 720px) { .charts { grid-template-columns: 1fr; } .hero h1 { font-size: 2.2rem; } }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="inner">
+    <span class="brand">duobench</span>
+    <a class="link" href="#setup">Setup</a>
+    <a class="link" href="#usage">Usage</a>
+    <a class="link" href="#how-it-works">How it works</a>
+    <a class="link" href="#scripts">Scripts</a>
+    <a class="link" href="#output">Output</a>
+    <a class="link gh" href="https://github.com/alejandro-ao/duobench">GitHub ↗</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <h1>duo<span>bench</span></h1>
+  <p class="tag">An <strong>agent skill</strong> that benchmarks <strong>planner&nbsp;×&nbsp;implementer LLM duos</strong> on real GitHub issues — and charts <strong>quality&nbsp;per&nbsp;dollar</strong>.</p>
+  <div class="badges">
+    <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="Apache 2.0">
+    <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
+    <img src="https://img.shields.io/badge/pi-integrated-9cf" alt="Pi integrated">
+  </div>
+  <div class="btns">
+    <a class="btn primary" href="#setup">Get started</a>
+    <a class="btn ghost" href="https://github.com/alejandro-ao/duobench">View source</a>
+  </div>
+</header>
+
+<section id="overview">
+  <h2>What is duobench?</h2>
+  <p class="lead">
+    duobench is <strong>not a CLI — it's a skill for coding agents</strong> (Claude Code and
+    compatible harnesses). You install it once, then ask your agent in plain language to run a
+    benchmark; the agent does the orchestration. A <em>planner</em> model writes a handoff plan,
+    an <em>implementer</em> model fixes the issue with exactly one local commit, and a panel of
+    <em>judge</em> models scores each fix on four dimensions. Cost comes from token usage, so
+    every pairing lands on a quality-per-dollar chart.
+  </p>
+  <div class="cards">
+    <div class="card"><h4>🗣️ Conversational</h4><p>No monolithic CLI. Say "benchmark opus and kimi on issue #4041 of pallets/flask" and the agent launches, gates, and aggregates every phase job.</p></div>
+    <div class="card"><h4>🔒 Safe by default</h4><p>The implementer commits locally only — git/gh safety wrappers and remote removal make pushes and PRs impossible in the default mode.</p></div>
+    <div class="card"><h4>📊 Charts included</h4><p>Every run ends with <code>results.json</code>, inspectable worktrees + commits, and a set of consistent seaborn charts.</p></div>
+  </div>
+
+  <h3>The pipeline</h3>
+  <pre class="pipeline">┌─────────────┐     ┌──────────────────┐     ┌──────────────┐
+│   GitHub    │────▶│     Planner      │────▶│ Implementer  │────▶ local commit
+│    Issue    │     │ (plan + handoff) │     │ (code only)  │        │
+└─────────────┘     └──────────────────┘     └──────────────┘        │
+                              ┌──────────────────────────────────────┘
+                              ▼
+                       ┌─────────────┐
+                       │    Judges   │  ◄── score on 4 dimensions; cost from tokens
+                       └─────────────┘</pre>
+
+  <h3>Charts from a real run (pallets/flask#4041, opus-4.8 × kimi-k2.6)</h3>
+  <div class="charts">
+    <img src="assets/cost-vs-quality.png" alt="Cost vs quality scatter — the money chart">
+    <img src="assets/leaderboard.png" alt="Quality leaderboard per condition">
+    <img src="assets/cost-breakdown.png" alt="Plan vs implement cost per condition">
+    <img src="assets/self-bias.png" alt="Self-bias: does each judge favor its own model?">
+  </div>
+</section>
+
+<section id="setup">
+  <h2>Setup</h2>
+  <p class="lead">Four tools, one install command.</p>
+
+  <h3>1. Prerequisites</h3>
+  <table>
+    <tr><th>Tool</th><th>Why</th></tr>
+    <tr><td><code>uv</code> + Python 3.11+</td><td>Runs every script — each carries PEP 723 inline deps, no project setup needed.</td></tr>
+    <tr><td><code>git</code> + <code>gh</code> (authenticated)</td><td>Planner/implementer read the issue via <code>gh</code>; the engine worktrees the target repo.</td></tr>
+    <tr><td><code>pi</code></td><td>The RPC harness that drives each model — must have your providers configured.</td></tr>
+    <tr><td><code>tmux</code></td><td>Hosts the long-running phase jobs in parallel.</td></tr>
+  </table>
+  <pre><code># verify everything in one go
+gh auth status && pi --version && git status && tmux -V && uv --version</code></pre>
+
+  <h3>2. Install the skill</h3>
+  <p>It is fully self-contained — engine, scripts, prompts, and configs all live inside the skill directory:</p>
+  <pre><code>npx skills add alejandro-ao/duobench</code></pre>
+  <p>Working on duobench itself? Clone the repo and <code>uv sync</code> — the skill lives at
+  <code>skills/duobench/</code> and <code>.claude/skills</code> symlinks to it.</p>
+
+  <h3>3. Sanity-check your models</h3>
+  <p>Every model key you plan to use must resolve in the skill's <code>config/models.yaml</code>
+  and its <code>provider/model_id</code> must be registered + authenticated in Pi. The agent
+  checks this in preflight before spending money.</p>
+</section>
+
+<section id="usage">
+  <h2>Usage examples</h2>
+  <p class="lead">The intended way to run duobench is to <strong>ask the agent</strong>. With the skill installed, prompts like these trigger it:</p>
+
+  <div class="quote">"Benchmark the quality:cost ratio of kimi planning + gpt-5.5 implementing, and vice versa, on issue #4041 of pallets/flask."</div>
+  <div class="quote">"Benchmark opus and kimi on duobench and produce plots about the results."</div>
+  <div class="quote">"Add a gpt planner / kimi implementer condition to the last duobench run and re-plot."</div>
+  <div class="quote">"Re-plot the last duobench run, but correctness vs cost only, faceted by planner."</div>
+
+  <p>The agent will: confirm the issue + model matrix + estimated job count, announce the output
+  dir (default <code>./duobench-runs/&lt;timestamp&gt;/</code>), launch plan → implement → judge
+  phase jobs in tmux (gating each phase on completion), aggregate, then write and run a seaborn
+  plotting script and show you the charts.</p>
+
+  <h3>Watch any job live</h3>
+  <pre><code>tmux ls                                  # list duobench jobs
+tmux attach -t &lt;job&gt;                     # watch one (detach with Ctrl-b then d)
+tail -f &lt;run-dir&gt;/conditions/&lt;cond&gt;/trial-0/job.log</code></pre>
+
+  <h3>Or call the scripts directly (no agent)</h3>
+  <p>Run them from a clone of the target repo (the engine worktrees the current directory):</p>
+  <pre><code>SKILL_DIR=&lt;path to the installed skill&gt;   # in this repo: $PWD/skills/duobench
+RUNS=$PWD/duobench-runs
+TS=$(date -u +%Y-%m-%dT%H-%M-%S); ISSUE=https://github.com/org/repo/issues/123
+
+# 1) plan (one per unique planner)
+uv run "$SKILL_DIR/scripts/run_phase.py" --phase plan \
+  --run-dir $RUNS/$TS --out-dir $RUNS/$TS/shared-plans/kimi-k2.6/trial-0 \
+  --issue $ISSUE --planner kimi-k2.6 --trial 0
+
+# 2) implement (one per condition) — points at that planner's plan.md
+uv run "$SKILL_DIR/scripts/run_phase.py" --phase implement \
+  --run-dir $RUNS/$TS --out-dir $RUNS/$TS/conditions/kimi-k2.6-solo/trial-0 \
+  --issue $ISSUE --condition kimi-k2.6-solo \
+  --planner kimi-k2.6 --implementer kimi-k2.6 \
+  --plan-path $RUNS/$TS/shared-plans/kimi-k2.6/trial-0/plan.md --trial 0
+
+# 3) judge (one per condition × judge) — commit SHA from the implement result.json
+uv run "$SKILL_DIR/scripts/run_phase.py" --phase judge \
+  --run-dir $RUNS/$TS --out-dir $RUNS/$TS/conditions/kimi-k2.6-solo/trial-0 \
+  --issue $ISSUE --condition kimi-k2.6-solo --judge-key gpt-5.5 \
+  --build-dir $RUNS/$TS/conditions/kimi-k2.6-solo/trial-0/worktree \
+  --commit-sha &lt;SHA&gt; --trial 0
+
+# 4) aggregate → results.json   5) plot → results/*.png
+uv run "$SKILL_DIR/scripts/aggregate.py" $RUNS/$TS
+uv run "$SKILL_DIR/scripts/plots_example.py" $RUNS/$TS</code></pre>
+
+  <h3>Benchmarking an issue from another repo (SWE-bench style)</h3>
+  <p>The implementer commits into a worktree of the <strong>current directory</strong>, so to
+  benchmark an issue from a different repo, run phase jobs from a clone of that repo, checked
+  out at the <em>pre-fix base</em> (first parent of the fixing PR's merge commit):</p>
+  <pre><code>TGT=~/repos/duobench-targets/flask-4041
+BASE=$(gh api repos/pallets/flask/commits/&lt;merge_sha&gt; -q '.parents[0].sha')
+git clone https://github.com/pallets/flask.git "$TGT" && git -C "$TGT" checkout "$BASE"
+git -C "$TGT" config extensions.worktreeConfig true  # REQUIRED, else implement jobs fail
+cd "$TGT"   # then launch phase jobs from here</code></pre>
+
+  <div class="note">⚠️ One issue is an anecdote. Multi-issue / multi-trial sweeps make results
+  statistically meaningful but cost scales as <code>issues × conditions × jobs × trials</code> —
+  they are opt-in only. Start small: one condition, one trial, a test issue.</div>
+</section>
+
+<section id="how-it-works">
+  <h2>How the skill works</h2>
+  <p class="lead">
+    The <a href="https://github.com/alejandro-ao/duobench/blob/main/skills/duobench/SKILL.md"><code>SKILL.md</code></a>
+    is an orchestration contract for the agent. A <strong>condition</strong> is one
+    planner×implementer pairing, identified as <code>&lt;planner&gt;-x-&lt;implementer&gt;</code>
+    (or <code>&lt;planner&gt;-solo</code> when they're equal). Each phase is one Pi RPC instance run by
+    <code>scripts/run_phase.py</code>, which writes a <code>result.json</code> sentinel as its last
+    action — the agent polls for that file to know a job is done.
+  </p>
+
+  <h3>Phases</h3>
+  <table>
+    <tr><th>Phase</th><th>Jobs</th><th>Reads</th><th>Writes</th></tr>
+    <tr><td><strong>plan</strong></td><td>one per unique planner × trial</td><td>the issue + repo</td><td><code>shared-plans/&lt;planner&gt;/trial-&lt;n&gt;/plan.md</code></td></tr>
+    <tr><td><strong>implement</strong></td><td>one per condition × trial</td><td>the planner's <code>plan.md</code></td><td><code>worktree/</code>, <code>commit.json</code>, <code>verify.json</code>, <code>trial.json</code></td></tr>
+    <tr><td><strong>judge</strong></td><td>one per condition × judge × trial</td><td>the commit + diff</td><td><code>judge-transcripts/&lt;judge&gt;.json</code></td></tr>
+    <tr><td><strong>aggregate</strong></td><td>one (pure, no model calls)</td><td>every <code>trial.json</code></td><td><code>results.json</code></td></tr>
+    <tr><td><strong>plot</strong></td><td>one (pure)</td><td><code>results.json</code> + <code>trial.json</code></td><td><code>results/*.png</code> + <code>*.csv</code></td></tr>
+  </table>
+
+  <h3>The orchestration contract, in short</h3>
+  <ul>
+    <li><strong>Strict order:</strong> plan → implement → judge → aggregate → plot. A phase never starts until every job of the previous phase has written its <code>result.json</code>.</li>
+    <li><strong>One tmux job = one Pi instance = one unit of work.</strong> Money phases run in tmux with sessions named <code>duobench__&lt;TS&gt;__&lt;phase&gt;__&lt;unit&gt;</code>; pure steps run as plain background commands.</li>
+    <li><strong>Confirm before spending.</strong> The agent shows the issue, condition list, judge panel, trials, output dir, and the job estimate (<code>planners + conditions + conditions×judges</code>, × trials) and waits for a go-ahead. opus+kimi with 2 judges and 1 trial = 14 model-calling jobs.</li>
+    <li><strong>Concurrency cap:</strong> 2 money-jobs at once by default.</li>
+    <li><strong><code>run_state.json</code> is the source of truth</strong> — a fresh agent can resume any run from disk + <code>tmux ls</code>, never from memory.</li>
+    <li><strong>Idempotent + resumable:</strong> a unit whose out-dir already has a <code>result.json</code> with <code>status:"complete"</code> is skipped; adding a condition reuses existing plans and re-aggregates the whole run dir.</li>
+  </ul>
+
+  <h3>What each agent role is asked to do</h3>
+  <ul>
+    <li><strong>Planner</strong> — inspect the issue (<code>gh</code>) and repo; produce a plan; never modify files.</li>
+    <li><strong>Implementer</strong> — work in an isolated git worktree, run checks, create <strong>one local commit</strong>, return its SHA. Never push, never open a PR. Enforced three ways: the prompt, PATH-prepended <code>git</code>/<code>gh</code> wrappers that reject pushes/PRs, and removal of the <code>upstream</code> remote.</li>
+    <li><strong>Judge</strong> — inspect the commit/diff/worktree read-only and emit strict JSON scores on <code>task_completion</code>, <code>correctness</code>, <code>code_quality</code>, <code>verification</code> (1–10). <code>cost_efficiency</code> = quality ÷ cost, computed by <code>aggregate.py</code>, not judged.</li>
+  </ul>
+
+  <h3>Models &amp; costs</h3>
+  <p><code>--planner</code>, <code>--implementer</code>, and <code>--judge-key</code> accept a registry
+  key from <code>config/models.yaml</code> (<code>kimi-k2.6</code>, <code>gpt-5.5</code>) or a raw Pi spec
+  (<code>openai-codex/gpt-5.5</code>), optionally with a <code>:thinking</code> suffix. Cost prefers
+  Pi-reported billing; otherwise it falls back to the model's <code>pricing</code> block ($/MTok).</p>
+  <div class="note">⚠️ <strong>Set <code>cache_read</code> for any configured-priced model.</strong>
+  An agentic implement loop is ~90% cache-read tokens; without a <code>cache_read</code> rate those
+  hits are billed at full input price, inflating cost several-fold and making efficiency
+  comparisons unfair.</div>
+  <pre><code># config/models.yaml
+models:
+  kimi-k2.6:
+    provider: kimi-coding
+    model_id: kimi-for-coding
+    thinking: high
+    pricing: { input: 0.95, output: 4.00, cache_read: 0.16 }
+judges: [kimi-k2.6, gpt-5.5]</code></pre>
+</section>
+
+<section id="scripts">
+  <h2>Scripts reference</h2>
+  <p class="lead">Everything lives under <code>skills/duobench/scripts/</code>. Each script carries
+  PEP&nbsp;723 inline dependencies, so <code>uv run &lt;script&gt;</code> works with no project setup.</p>
+
+  <h3><code>run_phase.py</code> — the phase runner</h3>
+  <p>Runs exactly one unit of work (one Pi RPC instance) for one phase, then atomically writes a
+  <code>result.json</code> sentinel into <code>--out-dir</code>. The agent (or you) launches one of
+  these per plan/implement/judge job.</p>
+  <table>
+    <tr><th>Flag</th><th>Phases</th><th>Description</th></tr>
+    <tr><td><code>--phase plan|implement|judge</code></td><td>all</td><td>which phase to run</td></tr>
+    <tr><td><code>--run-dir</code> / <code>--out-dir</code></td><td>all</td><td>run root, and this job's output dir (where <code>result.json</code> lands)</td></tr>
+    <tr><td><code>--issue URL</code></td><td>all</td><td>GitHub issue (required)</td></tr>
+    <tr><td><code>--trial N</code></td><td>all</td><td>trial index</td></tr>
+    <tr><td><code>--timeout SEC</code></td><td>all</td><td>wall-clock (defaults: plan 600, implement 1800, judge 300)</td></tr>
+    <tr><td><code>--submission-mode local_commit|pr</code></td><td>implement</td><td>default <code>local_commit</code> (safe); <code>pr</code> is the legacy PR-creating flow</td></tr>
+    <tr><td><code>--planner SPEC</code></td><td>plan, implement</td><td>planner model spec/key</td></tr>
+    <tr><td><code>--implementer SPEC</code> / <code>--plan-path</code></td><td>implement</td><td>implementer spec; path to the planner's <code>plan.md</code></td></tr>
+    <tr><td><code>--judge-key SPEC</code> / <code>--build-dir</code> / <code>--commit-sha</code></td><td>judge</td><td>judge spec; the trial's worktree; the commit to score</td></tr>
+    <tr><td><code>--models-config / --conditions-config / --costs-config</code></td><td>all</td><td>config paths</td></tr>
+    <tr><td><code>--no-pi-sessions</code></td><td>all</td><td>don't persist Pi sessions</td></tr>
+  </table>
+
+  <h3><code>aggregate.py</code> — fold trials into <code>results.json</code></h3>
+  <pre><code>uv run "$SKILL_DIR/scripts/aggregate.py" runs/&lt;ts&gt; [--judges kimi-k2.6,gpt-5.5]</code></pre>
+  <p>Pure — no model calls. Run it after all judge jobs finish (and again after adding a
+  condition). It folds every <code>conditions/*/trial-*/trial.json</code> into the judged record,
+  writes <code>judge_scores</code> back into each <code>trial.json</code>, (over)writes
+  <code>results.json</code>, and prints a leaderboard. Safe to re-run: it rescans the whole run dir,
+  so old + newly added conditions merge automatically.</p>
+
+  <h3><code>plots_example.py</code> — the standard chart set</h3>
+  <pre><code>uv run "$SKILL_DIR/scripts/plots_example.py" runs/&lt;ts&gt;</code></pre>
+  <p>Writes <code>results/*.png</code> (+ matching <code>.csv</code>), all styled consistently:
+  <strong>leaderboard</strong>, <strong>cost-vs-quality</strong> (with iso-efficiency guide lines),
+  <strong>dimensions</strong>, <strong>self-bias</strong> (own-vs-other judge bars), and
+  <strong>cost-breakdown</strong> (plan vs implement spend). To customize a run's charts, copy it
+  to <code>&lt;run-dir&gt;/plots.py</code> and adapt — see <code>references/plotting.md</code>.</p>
+
+  <h3><code>plot_styles.py</code> — shared theme + data loaders</h3>
+  <p>Imported by plotting scripts; not run directly. Provides <code>apply_duobench_theme()</code>,
+  tidy pandas loaders (<code>load_results</code>, <code>load_trials</code>), per-model stable colors
+  (<code>color_for</code>), and dynamic dimension-name discovery so charts stay consistent across
+  runs and schema drift.</p>
+
+  <h3><code>export_session.py</code> — transcripts to Markdown</h3>
+  <pre><code>uv run "$SKILL_DIR/scripts/export_session.py" &lt;session.jsonl&gt; &lt;out.md&gt;</code></pre>
+  <p>Renders a session <code>.jsonl</code> transcript into readable Markdown: user prompts,
+  assistant text, tool calls, and truncated tool results. Handy for inspecting what a planner,
+  implementer, or judge actually did.</p>
+
+  <h3>Other skill files</h3>
+  <table>
+    <tr><th>Path</th><th>What it is</th></tr>
+    <tr><td><code>SKILL.md</code></td><td>The agent orchestration contract — phases, gates, tmux recipes, failure handling.</td></tr>
+    <tr><td><code>src/duobench/</code></td><td>The engine: worktree management, Pi RPC driving, cost computation, safety wrappers.</td></tr>
+    <tr><td><code>config/models.yaml</code></td><td>Model registry (provider, model_id, thinking, pricing) + the default judge panel.</td></tr>
+    <tr><td><code>config/conditions.yaml</code></td><td>Optional named pairings (the agent usually expands a matrix directly).</td></tr>
+    <tr><td><code>prompts/</code></td><td>Role prompts: architect (planner), implement, judge — plus local-commit variants.</td></tr>
+    <tr><td><code>references/</code></td><td>Deep-dives: external-repo benchmarking, plotting customization, multi-issue scaling.</td></tr>
+  </table>
+</section>
+
+<section id="output">
+  <h2>Output layout</h2>
+  <p class="lead">Each run writes everything under its run dir (default <code>./duobench-runs/&lt;timestamp&gt;/</code>):</p>
+  <pre><code>run_state.json                       # orchestration state (agent-owned; enables resume)
+results.json                         # aggregated leaderboard + self-bias
+results/                             # the charts + csvs
+  leaderboard.png / .csv
+  cost-vs-quality.png / .csv
+  dimensions.png / .csv
+  self-bias.png / .csv
+  cost-breakdown.png / .csv
+plots.py                             # the run's plotting script (if customized)
+shared-plans/&lt;planner&gt;/trial-&lt;n&gt;/
+  plan.md  shared-plan.json  planner-transcript.json  result.json
+conditions/&lt;cond-id&gt;/trial-&lt;n&gt;/
+  worktree/                          # isolated git worktree for the candidate fix
+  .duobench-harness/                 # safety shims/hooks kept outside the candidate fix
+  plan.md  commit.json  verify.json  trial.json
+  implementer-transcript.json
+  judge-transcripts/&lt;judge&gt;.json
+  result.json                        # implement-job sentinel
+  results/judge-&lt;judge&gt;.json         # per-judge-job sentinel</code></pre>
+  <p><code>trial.json</code> is self-contained (<code>benchmark</code>, <code>artifacts</code>,
+  <code>record</code>, <code>judge_scores</code>), so <code>aggregate.py</code> and any plotting
+  script can consume a run without re-running it. The plots are a decision aid — inspecting the
+  actual worktree commits is the last step before trusting a pairing on a real project.</p>
+
+  <h3>Troubleshooting</h3>
+  <table>
+    <tr><th>Problem</th><th>Solution</th></tr>
+    <tr><td><code>--issue is required</code></td><td>Pass <code>--issue https://github.com/org/repo/issues/123</code>.</td></tr>
+    <tr><td><code>gh CLI is required</code></td><td><code>gh auth login &amp;&amp; gh auth status</code>.</td></tr>
+    <tr><td>Pi cannot find a model</td><td>Check <code>provider</code>/<code>model_id</code> in <code>config/models.yaml</code> match your Pi install.</td></tr>
+    <tr><td>A job seems stuck</td><td><code>tmux attach -t &lt;job&gt;</code> and <code>tail -f &lt;out&gt;/job.log</code>; its <code>result.json</code> appears when done.</td></tr>
+    <tr><td>Implement jobs error with <code>--worktree cannot be used with multiple working trees</code></td><td><code>git -C &lt;repo&gt; config extensions.worktreeConfig true</code>, then retry.</td></tr>
+    <tr><td>A model looks far more expensive than expected</td><td>It's configured-priced without a <code>cache_read</code> rate — add one to <code>models.yaml</code>.</td></tr>
+  </table>
+</section>
+
+<footer>
+  <p>duobench · Apache-2.0 · <a href="https://github.com/alejandro-ao/duobench">github.com/alejandro-ao/duobench</a></p>
+</footer>
+
+</body>
+</html>
