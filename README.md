@@ -1,3 +1,7 @@
+# duobench
+
+---
+
 <div align="center">
 
 <img src="docs/assets/banner.svg" alt="duobench — an agent skill: benchmark planner × implementer LLM duos on real GitHub issues, charted as quality per dollar" width="100%">
