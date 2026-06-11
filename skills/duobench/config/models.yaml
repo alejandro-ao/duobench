@@ -19,7 +19,8 @@ models:
     # condition references a model whose set_model is rejected by Pi.
     provider: anthropic
     model_id: claude-opus-4-8
-    pricing: { input: 5.00, output: 25.00 }
+    # Anthropic prompt caching: read = 0.1x input, write (5m TTL) = 1.25x input
+    pricing: { input: 5.00, output: 25.00, cache_read: 0.50, cache_write: 6.25 }
 
 # Judge panel — explicit list of model keys, chosen independently of who competes.
 # Each judge scores every build; scores are averaged per build per dimension.
