@@ -4,7 +4,7 @@
 
 <p>
   <a href="https://github.com/alejandro-ao/duobench/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT">
+    <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0">
   </a>
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/pi-integrated-9cf" alt="Pi">
@@ -376,10 +376,3 @@ store. Pass `--no-pi-sessions` to disable.
 - [`DESIGN.md`](DESIGN.md) — design rationale
 - [`skills/duobench/SKILL.md`](skills/duobench/SKILL.md) — the agent orchestration contract
 
----
-
-<div align="center">
-
-**Made with ❤️ by [Alejandro AO](https://github.com/alejandro-ao)**
-
-</div>
