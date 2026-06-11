@@ -375,6 +375,5 @@ store. Pass `--no-pi-sessions` to disable.
 
 ## Design
 
-- [`DESIGN.md`](DESIGN.md) — design rationale
 - [`skills/duobench/SKILL.md`](skills/duobench/SKILL.md) — the agent orchestration contract
 
